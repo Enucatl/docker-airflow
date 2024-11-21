@@ -137,12 +137,12 @@ services:
     labels:
       - "checkmk_monitor=true"
       - "traefik.enable=true"
-      - "traefik.http.routers.paperless.rule=Host(`airflow.nuc10i7fnh.home.arpa`)"
-      - "traefik.http.routers.paperless.entrypoints=https"
-      - "traefik.http.routers.paperless.middlewares=authelia@docker,secured@file"
-      - "traefik.http.routers.paperless.tls=true"
-      - "traefik.http.routers.paperless.service=airflow"
-      - "traefik.http.services.paperless.loadbalancer.server.port=8080"
+      - "traefik.http.routers.airflow.rule=Host(`airflow.nuc10i7fnh.home.arpa`)"
+      - "traefik.http.routers.airflow.entrypoints=https"
+      - "traefik.http.routers.airflow.middlewares=authelia@docker,secured@file"
+      - "traefik.http.routers.airflow.tls=true"
+      - "traefik.http.routers.airflow.service=airflow"
+      - "traefik.http.services.airflow.loadbalancer.server.port=8080"
 
   airflow-scheduler:
     <<: *airflow-common
