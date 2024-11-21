@@ -62,7 +62,7 @@ x-airflow-common:
     AIRFLOW__CORE__FERNET_KEY: ''
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'true'
-    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.remote_user,airflow.api.auth.backend.session'
+    AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.session'
     AIRFLOW__WEBSERVER__AUTHENTICATE: "True"
     AIRFLOW__WEBSERVER__AUTH_TYPE: "AUTH_REMOTE_USER"
     AIRFLOW__WEBSERVER__USE_FAB: "True"
