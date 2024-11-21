@@ -63,10 +63,8 @@ x-airflow-common:
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'true'
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.session'
-    AIRFLOW__WEBSERVER__AUTHENTICATE: "True"
-    AIRFLOW__WEBSERVER__AUTH_TYPE: "AUTH_REMOTE_USER"
-    AIRFLOW__WEBSERVER__USE_FAB: "True"
-    AIRFLOW__WEBSERVER__REMOTE_USER_HEADER: "Remote-User"
+    AIRFLOW__WEBSERVER__AUTHENTICATION: 'remote_user'
+    AIRFLOW__REMOTE_USER__HEADER: 'Remote-User'
     # yamllint disable rule:line-length
     # Use simple http server on scheduler for health checks
     # See https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/check-health.html#scheduler-health-check-server
