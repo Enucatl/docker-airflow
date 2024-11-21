@@ -111,7 +111,7 @@ services:
     environment:
       REDIS_USER: airflow
       REDIS_PASSWORD: ${REDIS_PASSWORD}
-    command: redis-server --requirepass ${REDIS_PASSWORD} --user ${REDIS_USER}
+    command: redis-server --requirepass ${REDIS_PASSWORD} --user airflow
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
