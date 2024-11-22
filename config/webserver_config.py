@@ -22,7 +22,8 @@ class CustomMiddleware:
         self.wsgi_app = wsgi_app
 
     def __call__(self, environ: dict, start_response: Callable) -> Any:
-        environ["REMOTE_USER"] = environ["HTTP_REMOTE_USER"]
+        if "HTTP_REMOTE_USER" in environ:
+            environ["REMOTE_USER"] = environ["HTTP_REMOTE_USER"]
         return self.wsgi_app(environ, start_response)
 
 
