@@ -1,28 +1,9 @@
-#
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
-#
-#   http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
-"""Default configuration for the Airflow webserver."""
-
-from __future__ import annotations
-
 import os
+from typing import Any, Callable
+
+from flask import current_app
 
 # from flask_appbuilder.const import AUTH_DB
-
 # from airflow.www.fab_security.manager import AUTH_LDAP
 # from airflow.www.fab_security.manager import AUTH_OAUTH
 # from airflow.www.fab_security.manager import AUTH_OID
@@ -34,6 +15,16 @@ basedir = os.path.abspath(os.path.dirname(__file__))
 # Flask-WTF flag for CSRF
 WTF_CSRF_ENABLED = True
 WTF_CSRF_TIME_LIMIT = None
+
+
+class CustomMiddleware:
+    def __init__(self, wsgi_app: Callable) -> None:
+        self.wsgi_app = wsgi_app
+
+    def __call__(self, environ: dict, start_response: Callable) -> Any:
+        environ["REMOTE_USER"] = environ["HTTP_REMOTE_USER"]
+        return self.wsgi_app(environ, start_response)
+
 
 # ----------------------------------------------------
 # AUTHENTICATION CONFIG (specific to FAB auth manager)
@@ -130,3 +121,5 @@ AUTH_USER_REGISTRATION_ROLE = "Admin"
 # APP_THEME = "superhero.css"
 # APP_THEME = "united.css"
 # APP_THEME = "yeti.css"
+
+current_app.wsgi_app = CustomMiddleware(current_app.wsgi_app)
