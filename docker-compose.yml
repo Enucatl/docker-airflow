@@ -86,6 +86,8 @@ x-airflow-common:
     - airflow-logs-volume:/opt/airflow/logs
     - airflow-venv-volume:/opt/airflow/venv
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
+    - /etc/ssl/certs/puppet_ca.pem:/opt/airflow/certs/puppet_ca.pem:ro
+    - /etc/ssl/certs/root_2022_ca.pem:/opt/airflow/certs/root_2022_ca.pem:ro
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on
