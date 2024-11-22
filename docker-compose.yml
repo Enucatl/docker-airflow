@@ -64,6 +64,12 @@ x-airflow-common:
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.session'
     AIRFLOW__WEBSERVER__CONFIG_FILE: "/opt/airflow/config/webserver_config.py"
+    AIRFLOW__SMTP__SMTP_HOST: ${AIRFLOW__SMTP__SMTP_HOST}
+    AIRFLOW__SMTP__SMTP_MAIL_FROM: ${AIRFLOW__SMTP__SMTP_MAIL_FROM}
+    AIRFLOW__SMTP__SMTP_USER: ${AIRFLOW__SMTP__SMTP_USER}
+    AIRFLOW__SMTP__SMTP_PASSWORD: ${AIRFLOW__SMTP__SMTP_PASSWORD}
+    AIRFLOW__SMTP__SMTP_PORT: 10125
+
     # yamllint disable rule:line-length
     # Use simple http server on scheduler for health checks
     # See https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/check-health.html#scheduler-health-check-server
@@ -78,6 +84,7 @@ x-airflow-common:
   volumes:
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - airflow-logs-volume:/opt/airflow/logs
+    - airflow-venv-volume:/opt/airflow/venv
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
@@ -177,6 +184,7 @@ services:
       # Required to handle warm shutdown of the celery workers properly
       # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
       DUMB_INIT_SETSID: "0"
+      VAULT_TOKEN: ${VAULT_TOKEN}
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
@@ -301,6 +309,7 @@ services:
 volumes:
   postgres-db-volume:
   airflow-logs-volume:
+  airflow-venv-volume:
 
 networks:
   traefik_proxy:
