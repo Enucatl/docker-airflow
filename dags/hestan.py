@@ -184,8 +184,8 @@ with DAG(
             if latest_price < avg_price:
                 message = (
                     f"Alert for {key}!\n"
-                    f"Latest price (${latest_price:.2f}) is below "
-                    f"average (${avg_price:.2f})\n"
+                    f"Latest price ({latest_price:.2f}) is below "
+                    f"average ({avg_price:.2f})\n"
                     f"Timestamp: {latest_timestamp.isoformat()}\n"
                     f"Below is the price trend for the last two weeks.\n\n"
                     f"```\n{recent_data.to_string()}\n```"
