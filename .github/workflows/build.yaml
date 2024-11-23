@@ -1,0 +1,83 @@
+name: build from source
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build.yaml
+      - build/*
+  pull_request:
+    paths:
+      - .github/workflows/build.yaml
+      - build/*
+
+env:
+  DOCKER_REPO: ghcr.io/enucatl/airflow-config
+  DOCKER_REPO_DEV: ghcr.io/enucatl/airflow-config-dev
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+    steps:
+      - name: Checkout
+        uses: actions/checkout@master
+      - name: Set version
+        id: version
+        run: echo "version=`cat build/VERSION`" >> $GITHUB_OUTPUT
+      - name: Set repo
+        id: repo
+        run: if [[ $GITHUB_REF == "refs/heads/main" ]]; then echo "repo=${DOCKER_REPO}" >> $GITHUB_OUTPUT; else echo "repo=${DOCKER_REPO_DEV}" >> $GITHUB_OUTPUT; fi
+      - name: Docker meta
+        id: docker_meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.repo.outputs.repo }}
+      - name: Build image without push to registry
+        uses: docker/build-push-action@v5
+        with:
+          context: ./build
+          file: ./build/Dockerfile
+          push: true
+          tags: localhost:5000/airflow-config:latest
+          build-args: |
+            AIRFLOW_VERSION=${{ steps.get_version.outputs.version }}
+      - name: Scan image
+        id: scan
+        uses: anchore/scan-action@v3
+        with:
+          image: localhost:5000/airflow-config:latest
+          fail-build: true
+          severity-cutoff: critical
+      - name: Inspect action SARIF report
+        run: cat ${{ steps.scan.outputs.sarif }}
+      - name: Upload Anchore scan SARIF report
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: ${{ steps.scan.outputs.sarif }}
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        if: ${{ github.event_name != 'pull_request' }}
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./build
+          file: ./build/Dockerfile
+          platforms: ${{ env.PLATFORMS }}
+          tags: |
+            ${{ steps.repo.outputs.repo }}:build
+            ${{ steps.repo.outputs.repo }}:${{ steps.version.outputs.version }}-build
+            ${{ steps.docker_meta.outputs.tags }}
+          labels: ${{ steps.docker_meta.outputs.labels }}
+          push: ${{ github.event_name != 'pull_request' }}
+          build-args: |
+            AIRFLOW_VERSION=${{ steps.get_version.outputs.version }}
