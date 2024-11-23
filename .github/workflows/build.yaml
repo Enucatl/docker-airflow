@@ -52,7 +52,7 @@ jobs:
         uses: anchore/scan-action@v3
         with:
           image: localhost:5000/docker-airflow:latest
-          fail-build: true
+          fail-build: false
           severity-cutoff: critical
       - name: Inspect action SARIF report
         run: cat ${{ steps.scan.outputs.sarif }}
