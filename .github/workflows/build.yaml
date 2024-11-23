@@ -13,8 +13,8 @@ on:
       - build/*
 
 env:
-  DOCKER_REPO: ghcr.io/enucatl/airflow-config
-  DOCKER_REPO_DEV: ghcr.io/enucatl/airflow-config-dev
+  DOCKER_REPO: ghcr.io/enucatl/docker-airflow
+  DOCKER_REPO_DEV: ghcr.io/enucatl/docker-airflow-dev
 
 jobs:
   build:
@@ -44,14 +44,14 @@ jobs:
           context: ./build
           file: ./build/Dockerfile
           push: true
-          tags: localhost:5000/airflow-config:latest
+          tags: localhost:5000/docker-airflow:latest
           build-args: |
             AIRFLOW_VERSION=${{ steps.version.outputs.version }}
       - name: Scan image
         id: scan
         uses: anchore/scan-action@v3
         with:
-          image: localhost:5000/airflow-config:latest
+          image: localhost:5000/docker-airflow:latest
           fail-build: true
           severity-cutoff: critical
       - name: Inspect action SARIF report
