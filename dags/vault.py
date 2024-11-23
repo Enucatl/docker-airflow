@@ -7,6 +7,7 @@ default_args = {
     "start_date": "2024-11-22",
     "retries": 1,
     "retry_delay": timedelta(minutes=30),
+    "email_on_failure": True,
 }
 
 requirements = [
