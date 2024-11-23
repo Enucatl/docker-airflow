@@ -46,7 +46,7 @@ jobs:
           push: true
           tags: localhost:5000/airflow-config:latest
           build-args: |
-            AIRFLOW_VERSION=${{ steps.get_version.outputs.version }}
+            AIRFLOW_VERSION=${{ steps.version.outputs.version }}
       - name: Scan image
         id: scan
         uses: anchore/scan-action@v3
@@ -80,4 +80,4 @@ jobs:
           labels: ${{ steps.docker_meta.outputs.labels }}
           push: ${{ github.event_name != 'pull_request' }}
           build-args: |
-            AIRFLOW_VERSION=${{ steps.get_version.outputs.version }}
+            AIRFLOW_VERSION=${{ steps.version.outputs.version }}
