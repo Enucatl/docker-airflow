@@ -100,6 +100,23 @@ x-airflow-common:
       condition: service_healthy
 
 services:
+  postgres-outputs:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres-outputs-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 10s
+      retries: 5
+      start_period: 5s
+    restart: always
+    networks:
+      - traefik_proxy
+
   postgres:
     image: postgres:17
     environment:
@@ -314,6 +331,7 @@ services:
 
 volumes:
   postgres-db-volume:
+  postgres-outputs-volume:
   airflow-logs-volume:
   airflow-venv-volume:
 
