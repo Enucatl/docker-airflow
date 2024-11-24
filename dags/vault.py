@@ -34,6 +34,8 @@ with DAG(
         import hvac
         from airflow.hooks.base import BaseHook
 
+        from common.ssl import verify
+
         """
         Check the Vault token expiration and renew if necessary.
         """
@@ -46,7 +48,6 @@ with DAG(
             raise ValueError("No token found in Vault connection")
 
         # Initialize Vault client
-        verify = "/opt/airflow/certs/puppet_ca.pem"
         vault_client = hvac.Client(url=conn.host, token=current_token, verify=verify)
 
         # Look up token information

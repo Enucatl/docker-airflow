@@ -101,98 +101,58 @@ with DAG(
         venv_cache_path=venv_cache_path,
     )
     def analyze(table_name):
-        import io
         import asyncio
 
         import pandas as pd
         from airflow.providers.postgres.hooks.postgres import PostgresHook
-        import telegram
 
-        def create_price_plot(data, item_name):
-            import seaborn
-            import matplotlib.pyplot as plt
-
-            # Set the style
-            seaborn.set_style("whitegrid")
-            plt.figure(figsize=(10, 6))
-
-            # Create the line plot
-            seaborn.lineplot(data=data, x="timestamp", y="price")
-
-            # Customize the plot
-            plt.title(f"Price Trend for {item_name} - Last 2 Weeks")
-            plt.xlabel("Date")
-            plt.ylabel("Price (GBP)")
-            plt.xticks(rotation=45)
-            plt.tight_layout()
-
-            # Save the plot to a bytes buffer
-            buf = io.BytesIO()
-            plt.savefig(buf, format="png")
-            buf.seek(0)
-            plt.close()
-
-            return buf
-
-        def get_vault_credentials():
-            from airflow.hooks.base import BaseHook
-            import hvac
-
-            # Get Vault connection from Airflow
-            conn = BaseHook.get_connection("vault")
-            verify = "/opt/airflow/certs/puppet_ca.pem"
-
-            # Initialize Vault client
-            vault_client = hvac.Client(
-                url=conn.host, token=conn.password, verify=verify
-            )
-
-            # Get Telegram credentials from Vault
-            telegram_secrets = vault_client.secrets.kv.v2.read_secret_version(
-                path="enucatl_bot", mount_point="secret"
-            )
-
-            return {
-                "token": telegram_secrets["data"]["data"]["token"],
-                "chat_id": telegram_secrets["data"]["data"]["chat"],
-            }
-
-        async def send_telegram_message(message, plot_buffer=None):
-            credentials = get_vault_credentials()
-            bot = telegram.Bot(token=credentials["token"])
-
-            # Await the async operations
-            await bot.send_message(
-                chat_id=credentials["chat_id"], text=message, parse_mode="Markdown"
-            )
-            if plot_buffer:
-                await bot.send_photo(chat_id=credentials["chat_id"], photo=plot_buffer)
+        from hestan.functions import create_price_plot, send_telegram_message
 
         # Get Postgres connection from Airflow
+        messages_table = "hestan_messages"
         pg_hook = PostgresHook(postgres_conn_id="data")
         engine = pg_hook.get_sqlalchemy_engine()
         df = pd.read_sql(table_name, engine)
+        messages = pd.read_sql(messages_table, engine)
+        latest_timestamp = df["timestamp"].max()
+        two_weeks_ago = latest_timestamp - pd.Timedelta(days=14)
+        recent_messages = messages[messages["timestamp"] >= two_weeks_ago]
         for key in df["name"].unique():
             data = df[df["name"] == key]
             latest_price = data[data["timestamp"] == data["timestamp"].max()][
                 "price"
             ].max()
-            latest_timestamp = data["timestamp"].max()
-            avg_price = data["price"].mean()
-            two_weeks_ago = latest_timestamp - pd.Timedelta(days=14)
             recent_data = data[data["timestamp"] >= two_weeks_ago]
-            plot_buffer = create_price_plot(recent_data, key)
-            if latest_price < avg_price:
+            merged_data = pd.merge(
+                recent_data,
+                recent_messages,
+                on=["name"],
+                how="left",
+                suffixes=("", "_sent"),
+            )
+            message_data = merged_data[
+                merged_data["timestamp_sent"].isnull()
+                | (
+                    merged_data["timestamp_sent"].notnull()
+                    & (merged_data["price"] < merged_data["price_sent"])
+                    & (merged_data["timestamp"] >= merged_data["timestamp_sent"])
+                )
+            ]
+            if not message_data.empty:
                 message = (
-                    f"Alert for {key}!\n"
-                    f"Latest price ({latest_price:.2f}) is below "
-                    f"average ({avg_price:.2f})\n"
-                    f"Timestamp: {latest_timestamp.isoformat()}\n"
-                    f"Below is the price trend for the last two weeks.\n\n"
+                    f"{key}: price {latest_price:.2f}"
                     f"```\n{recent_data.to_string()}\n```"
                 )
-
+                plot_buffer = create_price_plot(recent_data, key)
                 asyncio.run(send_telegram_message(message, plot_buffer))
+                sent = pd.DataFrame(
+                    {
+                        "timestamp": [latest_timestamp],
+                        "price": [latest_price],
+                        "name": [key],
+                    }
+                )
+                sent.to_sql(messages_table, engine, if_exists="append", index=False)
 
     table = scrape()
     analyze(table)
