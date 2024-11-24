@@ -1,14 +1,8 @@
-from datetime import timedelta
-
 from airflow import DAG
 from airflow.decorators import task
 
-default_args = {
-    "start_date": "2024-11-22",
-    "retries": 1,
-    "retry_delay": timedelta(minutes=30),
-    "email_on_failure": True,
-}
+from common.defaults import default_args
+
 
 requirements = [
     "apache-airflow",
@@ -22,13 +16,11 @@ with DAG(
     default_args=default_args,
     description="Renew Vault token if expiring soon",
     schedule="@daily",
-    catchup=False,
 ) as dag:
 
     @task.virtualenv(
         task_id="check_and_renew_token",
         requirements=requirements,
-        venv_cache_path=venv_cache_path,
     )
     def check_and_renew_token() -> None:
         import hvac

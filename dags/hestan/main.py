@@ -1,15 +1,7 @@
-from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.decorators import task
 
-default_args = {
-    "depends_on_past": False,
-    "start_date": datetime(2024, 1, 1),
-    "retries": 1,
-    "retry_delay": timedelta(minutes=30),
-    "email_on_failure": True,
-}
-
+from common.default_args import default_args, venv_cache_path
 
 venv_cache_path = "/opt/airflow/venv"
 
@@ -18,7 +10,6 @@ with DAG(
     default_args=default_args,
     description="Scrape Hestan product page for prices",
     schedule="@hourly",
-    catchup=False,
 ) as dag:
 
     @task.virtualenv(
@@ -27,7 +18,6 @@ with DAG(
             "beautifulsoup4",
             "pandas",
         ],
-        venv_cache_path=venv_cache_path,
     )
     def scrape():
         import pandas as pd
@@ -98,7 +88,6 @@ with DAG(
             "python-telegram-bot",
             "seaborn",
         ],
-        venv_cache_path=venv_cache_path,
     )
     def analyze(table_name):
         import asyncio
