@@ -108,7 +108,6 @@ with DAG(
 
         from hestan.functions import create_price_plot, send_telegram_message
 
-        # Get Postgres connection from Airflow
         messages_table = "hestan_messages"
         pg_hook = PostgresHook(postgres_conn_id="data")
         engine = pg_hook.get_sqlalchemy_engine()
@@ -141,7 +140,7 @@ with DAG(
             if not message_data.empty:
                 message = (
                     f"{key}: price {latest_price:.2f}"
-                    f"```\n{recent_data.to_string()}\n```"
+                    f"```\n{recent_data[['timestamp', 'price']].to_string()}\n```"
                 )
                 plot_buffer = create_price_plot(recent_data, key)
                 asyncio.run(send_telegram_message(message, plot_buffer))
@@ -153,6 +152,7 @@ with DAG(
                     }
                 )
                 sent.to_sql(messages_table, engine, if_exists="append", index=False)
+        return messages_table
 
     table = scrape()
     analyze(table)

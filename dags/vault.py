@@ -69,4 +69,4 @@ with DAG(
             # Save the updated connection
             conn.set_connection()
 
-    check_and_renew_token_task = check_and_renew_token()
+    check_and_renew_token()
