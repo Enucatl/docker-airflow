@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from airflow import DAG
 from airflow.decorators import task
@@ -11,7 +11,7 @@ with DAG(
     default_args=default_args,
     description="A DAG to test failure emails",
     schedule="@once",
-    start_date=datetime(2023, 1, 1),
+    start_date=datetime(2024, 11, 22),
 ) as dag:
 
     @task.virtualenv(requirements=[])

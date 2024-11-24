@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from airflow import DAG
 from airflow.decorators import task
 
@@ -16,6 +18,7 @@ with DAG(
     default_args=default_args,
     description="Renew Vault token if expiring soon",
     schedule="@daily",
+    start_date=datetime(2024, 11, 22),
 ) as dag:
 
     @task.virtualenv(
