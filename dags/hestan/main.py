@@ -1,15 +1,17 @@
+from datetime import datetime
+
 from airflow import DAG
 from airflow.decorators import task
 
-from common.default_args import default_args, venv_cache_path
+from common.defaults import default_args
 
-venv_cache_path = "/opt/airflow/venv"
 
 with DAG(
     "hestan",
     default_args=default_args,
     description="Scrape Hestan product page for prices",
     schedule="@hourly",
+    start_date=datetime(2024, 11, 22),
 ) as dag:
 
     @task.virtualenv(
