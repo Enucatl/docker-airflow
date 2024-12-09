@@ -105,14 +105,14 @@ with DAG(
         df = pd.read_sql(table_name, engine)
         messages = pd.read_sql(messages_table, engine)
         latest_timestamp = df["timestamp"].max()
-        two_weeks_ago = latest_timestamp - pd.Timedelta(days=14)
-        recent_messages = messages[messages["timestamp"] >= two_weeks_ago]
+        recent_cutoff_date = latest_timestamp - pd.Timedelta(days=14)
+        recent_messages = messages[messages["timestamp"] >= recent_cutoff_date]
         for key in df["name"].unique():
             data = df[df["name"] == key]
             latest_price = data[data["timestamp"] == data["timestamp"].max()][
                 "price"
             ].max()
-            recent_data = data[data["timestamp"] >= two_weeks_ago]
+            recent_data = data[data["timestamp"] >= recent_cutoff_date]
             merged_data = pd.merge(
                 recent_data,
                 recent_messages,
@@ -131,7 +131,7 @@ with DAG(
             if not message_data.empty:
                 message = (
                     f"{key}: price {latest_price:.2f}"
-                    f"```\n{recent_data[['timestamp', 'price']].to_string()}\n```"
+                    f"```\n{recent_data[['timestamp', 'price']].tail(5).to_string()}\n```"
                 )
                 plot_buffer = create_price_plot(recent_data, key)
                 asyncio.run(send_telegram_message(message, plot_buffer))
