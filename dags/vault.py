@@ -59,9 +59,6 @@ with DAG(
             new_token = renewal_response["auth"]["client_token"]
 
             # Update the connection with the new token
-            conn.password = new_token
-
-            # Save the updated connection
-            conn.set_connection()
+            conn.set_password(new_token)
 
     check_and_renew_token()
