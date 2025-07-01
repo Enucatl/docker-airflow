@@ -58,38 +58,34 @@ x-airflow-common:
     - traefik_proxy
   environment:
     &airflow-common-env
-    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${POSTGRES_PASSWORD}@postgres/airflow
-    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:${POSTGRES_PASSWORD}@postgres/airflow
-    AIRFLOW__CELERY__BROKER_URL: redis://:@airflow-redis-1:6379/0
-    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
-    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
-    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__API__AUTH_BACKENDS: 'airflow.api.auth.backend.session'
+    AIRFLOW__CELERY__BROKER_URL: redis://:@airflow-redis-1:6379/0
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:${POSTGRES_PASSWORD}@postgres/airflow
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
+    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${POSTGRES_PASSWORD}@postgres/airflow
     AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: 'false'
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
+    AIRFLOW__SECRETS__BACKEND: airflow.providers.hashicorp.secrets.vault.VaultBackend
+    AIRFLOW__SECRETS__BACKEND_KWARGS: >-
+      {"url": "${VAULT_ADDR}", "auth_type": "token", "token_file_path": "/vault/secrets/token", "mount_point": "airflow"}
+    AIRFLOW__SMTP__SMTP_HOST: ${AIRFLOW__SMTP__SMTP_HOST}
+    AIRFLOW__SMTP__SMTP_MAIL_FROM: ${AIRFLOW__SMTP__SMTP_MAIL_FROM}
+    AIRFLOW__SMTP__SMTP_PASSWORD: ${AIRFLOW__SMTP__SMTP_PASSWORD}
+    AIRFLOW__SMTP__SMTP_PORT: 10125
+    AIRFLOW__SMTP__SMTP_USER: ${AIRFLOW__SMTP__SMTP_USER}
     AIRFLOW__WEBSERVER__BASE_URL: "https://airflow.nuc10i7fnh.home.arpa"
     AIRFLOW__WEBSERVER__CONFIG_FILE: "/opt/airflow/config/webserver_config.py"
     AIRFLOW__WEBSERVER__ENABLE_PROXY_FIX: "true"
     AIRFLOW__WEBSERVER__PROXY_FIX_X_FOR: 1
     AIRFLOW__WEBSERVER__PROXY_FIX_X_HOST: 3
-    AIRFLOW__SMTP__SMTP_HOST: ${AIRFLOW__SMTP__SMTP_HOST}
-    AIRFLOW__SMTP__SMTP_MAIL_FROM: ${AIRFLOW__SMTP__SMTP_MAIL_FROM}
-    AIRFLOW__SMTP__SMTP_USER: ${AIRFLOW__SMTP__SMTP_USER}
-    AIRFLOW__SMTP__SMTP_PASSWORD: ${AIRFLOW__SMTP__SMTP_PASSWORD}
-    AIRFLOW__SMTP__SMTP_PORT: 10125
-
-    # yamllint disable rule:line-length
-    # Use simple http server on scheduler for health checks
-    # See https://airflow.apache.org/docs/apache-airflow/stable/administration-and-deployment/logging-monitoring/check-health.html#scheduler-health-check-server
-    # yamllint enable rule:line-length
-    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
-    # WARNING: Use _PIP_ADDITIONAL_REQUIREMENTS option ONLY for a quick checks
-    # for other purpose (development, test and especially production usage) build/extend Airflow image.
-    _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
     # The following line can be used to set a custom config file, stored in the local config folder
     # If you want to use it, outcomment it and replace airflow.cfg with the name of your config file
     # AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
   volumes:
+    - vault-token-volume:/vault/secrets:ro
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - airflow-logs-volume:/opt/airflow/logs
     - airflow-venv-volume:/opt/airflow/venv
@@ -103,6 +99,8 @@ x-airflow-common:
       condition: service_healthy
     postgres:
       condition: service_healthy
+    vault-agent:
+      condition: service_started
 
 services:
   postgres-outputs:
@@ -212,7 +210,6 @@ services:
       # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
       DUMB_INIT_SETSID: "0"
       VAULT_ADDR: ${VAULT_ADDR}
-      VAULT_TOKEN: ${VAULT_TOKEN}
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
@@ -336,11 +333,38 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
+  vault-agent:
+    image: hashicorp/vault:latest
+    container_name: vault-agent
+    volumes:
+      - vault-token-volume:/vault/secrets
+      - ./config/vault-agent.hcl:/vault/config/agent.hcl
+      - vault-agent-config-volume:/vault/config
+    environment:
+      VAULT_ADDR: ${VAULT_ADDR}
+      AIRFLOW_ROLE_ID: ${AIRFLOW_ROLE_ID}
+      AIRFLOW_SECRET_ID: ${AIRFLOW_SECRET_ID}
+    command: >
+      /bin/sh -c "
+        # Write the initial credentials from env vars to files.
+        echo -n \"${AIRFLOW_ROLE_ID}\" > /vault/config/role_id;
+        echo -n \"${AIRFLOW_SECRET_ID}\" > /vault/config/secret_id;
+
+        # Start the vault agent
+        # The agent will now use the template to keep /vault/config/secret_id fresh.
+        vault agent -config=/vault/config/agent.hcl -log-level=debug;
+      "
+    restart: always
+    networks:
+      - traefik_proxy
+
 volumes:
   postgres-db-volume:
   postgres-outputs-volume:
   airflow-logs-volume:
   airflow-venv-volume:
+  vault-token-volume:
+  vault-agent-config-volume:
 
 networks:
   traefik_proxy:
