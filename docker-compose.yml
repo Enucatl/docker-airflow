@@ -70,7 +70,7 @@ x-airflow-common:
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
     AIRFLOW__SECRETS__BACKEND: airflow.providers.hashicorp.secrets.vault.VaultBackend
     AIRFLOW__SECRETS__BACKEND_KWARGS: >-
-      {"url": "${VAULT_ADDR}", "auth_type": "token", "token_file_path": "/vault/secrets/token", "mount_point": "airflow"}
+      {"url": "${VAULT_ADDR}", "auth_type": "ldap", "username": "airflow@HOME.ARPA", "password": "${AIRFLOW_LDAP_PASSWORD}"}
     AIRFLOW__SMTP__SMTP_HOST: ${AIRFLOW__SMTP__SMTP_HOST}
     AIRFLOW__SMTP__SMTP_MAIL_FROM: ${AIRFLOW__SMTP__SMTP_MAIL_FROM}
     AIRFLOW__SMTP__SMTP_PASSWORD: ${AIRFLOW__SMTP__SMTP_PASSWORD}
@@ -81,11 +81,13 @@ x-airflow-common:
     AIRFLOW__WEBSERVER__ENABLE_PROXY_FIX: "true"
     AIRFLOW__WEBSERVER__PROXY_FIX_X_FOR: 1
     AIRFLOW__WEBSERVER__PROXY_FIX_X_HOST: 3
+    AIRFLOW_LDAP_PASSWORD: ${AIRFLOW_LDAP_PASSWORD}
+    VAULT_ADDR: ${VAULT_ADDR}
+    VAULT_CACERT: /opt/airflow/certs/puppet_ca.pem
     # The following line can be used to set a custom config file, stored in the local config folder
     # If you want to use it, outcomment it and replace airflow.cfg with the name of your config file
     # AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
   volumes:
-    - vault-token-volume:/vault/secrets:ro
     - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
     - airflow-logs-volume:/opt/airflow/logs
     - airflow-venv-volume:/opt/airflow/venv
@@ -99,8 +101,6 @@ x-airflow-common:
       condition: service_healthy
     postgres:
       condition: service_healthy
-    vault-agent:
-      condition: service_started
 
 services:
   postgres-outputs:
@@ -209,7 +209,6 @@ services:
       # Required to handle warm shutdown of the celery workers properly
       # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
       DUMB_INIT_SETSID: "0"
-      VAULT_ADDR: ${VAULT_ADDR}
     restart: always
     depends_on:
       <<: *airflow-common-depends-on
@@ -333,38 +332,11 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
-  vault-agent:
-    image: hashicorp/vault:latest
-    container_name: vault-agent
-    volumes:
-      - vault-token-volume:/vault/secrets
-      - ./config/vault-agent.hcl:/vault/config/agent.hcl
-      - vault-agent-config-volume:/vault/config
-    environment:
-      VAULT_ADDR: ${VAULT_ADDR}
-      AIRFLOW_ROLE_ID: ${AIRFLOW_ROLE_ID}
-      AIRFLOW_SECRET_ID: ${AIRFLOW_SECRET_ID}
-    command: >
-      /bin/sh -c "
-        # Write the initial credentials from env vars to files.
-        echo -n \"${AIRFLOW_ROLE_ID}\" > /vault/config/role_id;
-        echo -n \"${AIRFLOW_SECRET_ID}\" > /vault/config/secret_id;
-
-        # Start the vault agent
-        # The agent will now use the template to keep /vault/config/secret_id fresh.
-        vault agent -config=/vault/config/agent.hcl -log-level=debug;
-      "
-    restart: always
-    networks:
-      - traefik_proxy
-
 volumes:
   postgres-db-volume:
   postgres-outputs-volume:
   airflow-logs-volume:
   airflow-venv-volume:
-  vault-token-volume:
-  vault-agent-config-volume:
 
 networks:
   traefik_proxy:
