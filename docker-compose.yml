@@ -87,6 +87,7 @@ x-airflow-common:
     AIRFLOW__SMTP__SMTP_USER: ${AIRFLOW__SMTP__SMTP_USER}
     AIRFLOW__FAB__CONFIG_FILE: '/opt/airflow/config/webserver_config.py'
     AIRFLOW_LDAP_PASSWORD: ${AIRFLOW_LDAP_PASSWORD}
+    AIRFLOW_LDAP_SERVER: ${AIRFLOW_LDAP_SERVER}
     VAULT_ADDR: ${VAULT_ADDR}
     VAULT_CACERT: /opt/airflow/certs/puppet_ca.pem
     # The following line can be used to set a custom config file, stored in the local config folder
@@ -146,6 +147,9 @@ services:
     # Redis is limited to 7.2-bookworm due to licencing change
     # https://redis.io/blog/redis-adopts-dual-source-available-licensing/
     image: redis:7.2-bookworm
+    sysctls:
+      - vm.overcommit_memory=1
+      - net.core.somaxconn=1024
     expose:
       - 6379
     healthcheck:

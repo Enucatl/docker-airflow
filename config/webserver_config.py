@@ -10,6 +10,7 @@ AUTH_USER_REGISTRATION_ROLE = AUTH_ROLE_ADMIN
 
 AUTH_LDAP_BIND_USER = "uid=airflow,cn=users,cn=accounts,dc=home,dc=arpa"
 AUTH_LDAP_BIND_PASSWORD = os.environ["AIRFLOW_LDAP_PASSWORD"]
+AUTH_LDAP_SERVER = os.environ["AIRFLOW_LDAP_SERVER"]
 
 # This is the base DN for your user searches.
 # Combining your base_dn and additional_users_dn
