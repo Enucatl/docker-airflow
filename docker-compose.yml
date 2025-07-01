@@ -160,7 +160,7 @@ services:
 
   airflow-apiserver:
     <<: *airflow-common
-    command: api-server --proxy-headers
+    command: api-server
     ports:
       - "8080:8080"
     healthcheck:
@@ -172,7 +172,6 @@ services:
     restart: always
     environment:
       <<: *airflow-common-env
-      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS}
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
