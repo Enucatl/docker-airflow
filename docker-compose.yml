@@ -54,6 +54,7 @@ x-airflow-common:
     - traefik_proxy
   environment:
     &airflow-common-env
+    AIRFLOW__API__BASE_URL: "https://airflow.nuc10i7fnh.home.arpa"
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
     AIRFLOW__CELERY__BROKER_URL: redis://:@airflow-redis-1:6379/0
@@ -82,11 +83,6 @@ x-airflow-common:
     AIRFLOW__SMTP__SMTP_PASSWORD: ${AIRFLOW__SMTP__SMTP_PASSWORD}
     AIRFLOW__SMTP__SMTP_PORT: 10125
     AIRFLOW__SMTP__SMTP_USER: ${AIRFLOW__SMTP__SMTP_USER}
-    AIRFLOW__WEBSERVER__BASE_URL: "https://airflow.nuc10i7fnh.home.arpa"
-    AIRFLOW__WEBSERVER__CONFIG_FILE: "/opt/airflow/config/webserver_config.py"
-    AIRFLOW__WEBSERVER__ENABLE_PROXY_FIX: "true"
-    AIRFLOW__WEBSERVER__PROXY_FIX_X_FOR: 1
-    AIRFLOW__WEBSERVER__PROXY_FIX_X_HOST: 3
     AIRFLOW_LDAP_PASSWORD: ${AIRFLOW_LDAP_PASSWORD}
     VAULT_ADDR: ${VAULT_ADDR}
     VAULT_CACERT: /opt/airflow/certs/puppet_ca.pem
