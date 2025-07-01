@@ -81,3 +81,9 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           build-args: |
             AIRFLOW_VERSION=${{ steps.version.outputs.version }}
+      - name: Trigger Portainer Redeploy
+        # This step runs only if the build and push was successful.
+        # It sends a POST request to a Portainer webhook, which triggers
+        # Portainer to pull the new :latest image and redeploy the service.
+        if: success()
+        run: curl -X POST ${{ secrets.PORTAINER_WEBHOOK_URL }}
