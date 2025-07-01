@@ -1,17 +1,18 @@
+from datetime import datetime
+
 from airflow import DAG
-from airflow.providers.postgres.operators.postgres import PostgresOperator
-from airflow.utils.dates import days_ago
+from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 
 with DAG(
     dag_id="vault_postgres_example",
-    start_date=days_ago(1),
-    schedule_interval=None,
+    start_date=datetime(2025, 6, 30),
+    schedule=None,
     catchup=False,
     tags=["vault", "postgres"],
 ) as dag:
-    create_table = PostgresOperator(
+    create_table = SQLExecuteQueryOperator(
         task_id="create_my_table",
-        postgres_conn_id="data",
+        conn_id="data",
         sql="""
             CREATE TABLE IF NOT EXISTS my_data (
                 id SERIAL PRIMARY KEY,
@@ -20,9 +21,9 @@ with DAG(
         """,
     )
 
-    insert_data = PostgresOperator(
+    insert_data = SQLExecuteQueryOperator(
         task_id="insert_sample_data",
-        postgres_conn_id="data",  # Airflow fetches this from Vault!
+        conn_id="data",
         sql="INSERT INTO my_data (value) VALUES ('Hello from Airflow');",
     )
 
