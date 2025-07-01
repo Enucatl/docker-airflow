@@ -56,7 +56,7 @@ jobs:
         with:
           images: ${{ steps.repo.outputs.repo }}
           tags: |
-            type=raw,value={{version}}-build,prefix=,suffix=,enable=${{ steps.version.outputs.version != '' }}
+            type=raw,value=${{ steps.version.outputs.version }}-${{ github.sha }}-build,prefix=,suffix=,enable=${{ steps.version.outputs.version != '' }}
             type=sha,prefix=,suffix=-build
 
       - name: Build and load image for scanning
