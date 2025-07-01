@@ -87,7 +87,6 @@ x-airflow-common:
     AIRFLOW__SMTP__SMTP_USER: ${AIRFLOW__SMTP__SMTP_USER}
     AIRFLOW__FAB__CONFIG_FILE: '/opt/airflow/config/webserver_config.py'
     AIRFLOW_LDAP_PASSWORD: ${AIRFLOW_LDAP_PASSWORD}
-    FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS}
     VAULT_ADDR: ${VAULT_ADDR}
     VAULT_CACERT: /opt/airflow/certs/puppet_ca.pem
     # The following line can be used to set a custom config file, stored in the local config folder
@@ -171,6 +170,9 @@ services:
       retries: 5
       start_period: 30s
     restart: always
+    environment:
+      <<: *airflow-common-env
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS}
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -180,7 +182,7 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.airflow.rule=Host(`airflow.nuc10i7fnh.home.arpa`)"
       - "traefik.http.routers.airflow.entrypoints=https"
-      - "traefik.http.routers.airflow.middlewares=authelia@docker,secured@file"
+      - "traefik.http.routers.airflow.middlewares=secured@file"
       - "traefik.http.routers.airflow.tls=true"
       - "traefik.http.routers.airflow.service=airflow"
       - "traefik.http.services.airflow.loadbalancer.server.port=8080"
