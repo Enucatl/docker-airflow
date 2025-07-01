@@ -2,15 +2,18 @@ import os
 
 from flask_appbuilder.const import AUTH_LDAP
 
-AUTH_TYPE = AUTH_LDAP
-AUTH_REMOTE_USER_ENV_VAR = "HTTP_REMOTE_USER"
 AUTH_ROLE_ADMIN = "Admin"
 AUTH_USER_REGISTRATION = True
 AUTH_USER_REGISTRATION_ROLE = AUTH_ROLE_ADMIN
 
 AUTH_LDAP_BIND_USER = "uid=airflow,cn=users,cn=accounts,dc=home,dc=arpa"
 AUTH_LDAP_BIND_PASSWORD = os.environ["AIRFLOW_LDAP_PASSWORD"]
-AUTH_LDAP_SERVER = os.environ["AIRFLOW_LDAP_SERVER"]
+AUTH_LDAP_SERVER = os.environ["AUTH_LDAP_SERVER"]
+print(f"{AUTH_LDAP_SERVER=}")
+
+AUTH_LDAP_USE_TLS = False
+# AUTH_LDAP_TLS_DEMAND = False
+AUTH_LDAP_TLS_CACERTFILE = "/opt/airflow/certs/root_2022_ca.pem"
 
 # This is the base DN for your user searches.
 # Combining your base_dn and additional_users_dn
@@ -56,3 +59,4 @@ AUTH_LDAP_ROLE_MAPPING = {
     "ops": "Op",
     "users": "User",
 }
+AUTH_TYPE = AUTH_LDAP
