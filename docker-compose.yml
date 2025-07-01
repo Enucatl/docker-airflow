@@ -54,7 +54,9 @@ x-airflow-common:
     - traefik_proxy
   environment:
     &airflow-common-env
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET}
     AIRFLOW__API__BASE_URL: "https://airflow.nuc10i7fnh.home.arpa"
+    AIRFLOW__API__WORKERS: 1
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
     AIRFLOW__CELERY__BROKER_URL: redis://:@airflow-redis-1:6379/0
