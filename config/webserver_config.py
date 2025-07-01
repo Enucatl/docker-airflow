@@ -7,22 +7,20 @@ AUTH_USER_REGISTRATION = True
 AUTH_USER_REGISTRATION_ROLE = AUTH_ROLE_ADMIN
 
 AUTH_LDAP_BIND_USER = "uid=airflow,cn=users,cn=accounts,dc=home,dc=arpa"
-AUTH_LDAP_BIND_PASSWORD = os.environ["AIRFLOW_LDAP_PASSWORD"]
-AUTH_LDAP_SERVER = os.environ["AUTH_LDAP_SERVER"]
-print(f"{AUTH_LDAP_SERVER=}")
+AUTH_LDAP_BIND_PASSWORD = os.environ.get("AIRFLOW_LDAP_PASSWORD", "")
+AUTH_LDAP_SERVER = os.environ.get("AUTH_LDAP_SERVER", "")
 
 AUTH_LDAP_USE_TLS = False
-# AUTH_LDAP_TLS_DEMAND = False
-AUTH_LDAP_TLS_CACERTFILE = "/opt/airflow/certs/root_2022_ca.pem"
+AUTH_LDAP_TLS_CACERTFILE = os.environ.get("AUTH_LDAP_TLS_CACERTFILE", "")
 
 # This is the base DN for your user searches.
 # Combining your base_dn and additional_users_dn
-AUTH_LDAP_SEARCH_BASE = "cn=users,cn=compat,dc=home,dc=arpa"
+AUTH_LDAP_SEARCH = "cn=users,cn=compat,dc=home,dc=arpa"
 
 # The filter to find a user. The user-provided username will be substituted for `%(username)s`.
 # Translated from: (&({username_attribute}={input})(objectClass=posixAccount))
 # We use 'uid' because you specified it as the username attribute.
-AUTH_LDAP_SEARCH_FILTER = "(&(objectClass=posixAccount)(uid=%(username)s))"
+AUTH_LDAP_SEARCH_FILTER = "(objectClass=posixAccount)"
 
 # The attribute that is used as the username for the Airflow user.
 AUTH_LDAP_UID_FIELD = "uid"
