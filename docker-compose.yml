@@ -115,15 +115,22 @@ services:
     environment:
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: airflow
+      POSTGRES_MULTIPLE_DATABASES: airflow,djangodev
     volumes:
       - postgres-outputs-volume:/var/lib/postgresql/data
+      - ${AIRFLOW_PROJ_DIR:-.}/config/create-multiple-postgresql-databases.sh:/docker-entrypoint-initdb.d/create-multiple-postgresql-databases.sh
     healthcheck:
       test: ["CMD", "pg_isready", "-U", "airflow"]
       interval: 10s
       retries: 5
       start_period: 5s
     restart: always
+    labels:
+      - "traefik.enable=true"
+      - "traefik.tcp.routers.postgres-outputs.entrypoints=postgres"
+      - "traefik.tcp.routers.postgres-outputs.rule=HostSNI(`postgres.nuc10i7fnh.home.arpa`)"
+      - "traefik.tcp.routers.postgres-outputs.service=postgres-outputs"
+      - "traefik.tcp.services.postgres-outputs.loadbalancer.server.port=5432"
     networks:
       - traefik_proxy
 
