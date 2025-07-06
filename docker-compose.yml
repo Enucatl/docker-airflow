@@ -130,7 +130,6 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.tcp.routers.postgres-outputs.entrypoints=postgres"
-      # - "traefik.tcp.routers.postgres-outputs.rule=HostSNI(`postgres.nuc10i7fnh.home.arpa`)"
       - "traefik.tcp.routers.postgres-outputs.service=postgres-outputs"
       - "traefik.tcp.services.postgres-outputs.loadbalancer.server.port=5432"
     networks:
