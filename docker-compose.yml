@@ -55,7 +55,7 @@ x-airflow-common:
   environment:
     &airflow-common-env
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET}
-    AIRFLOW__API__BASE_URL: "https://airflow.nuc10i7fnh.home.arpa"
+    AIRFLOW__API__BASE_URL: "https://airflow.${DOCKER_DOMAIN}"
     AIRFLOW__API__WORKERS: 1
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
@@ -72,13 +72,13 @@ x-airflow-common:
     AIRFLOW__SECRETS__BACKEND_KWARGS: |
       {
         "auth_type": "ldap",
-        "connections_path": "connections",
-        "mount_point": "airflow",
+        "connections_path": "airflow/connections",
+        "mount_point": "kv",
         "password": "${AIRFLOW_LDAP_PASSWORD}",
         "url": "${VAULT_ADDR}",
-        "username": "airflow@HOME.ARPA",
-        "variables_path": "variables",
-        "verify": "/opt/airflow/certs/puppet_ca.pem"
+        "username": "airflow",
+        "variables_path": "airflow/variables",
+        "verify": "/etc/ssl/certs/ca-certificates.crt"
       }
     AIRFLOW__SMTP__SMTP_HOST: ${AIRFLOW__SMTP__SMTP_HOST}
     AIRFLOW__SMTP__SMTP_MAIL_FROM: ${AIRFLOW__SMTP__SMTP_MAIL_FROM}
@@ -88,10 +88,10 @@ x-airflow-common:
     AIRFLOW__FAB__CONFIG_FILE: '/opt/airflow/config/webserver_config.py'
     AIRFLOW_LDAP_PASSWORD: ${AIRFLOW_LDAP_PASSWORD}
     AUTH_LDAP_SERVER: ${AUTH_LDAP_SERVER}
-    AUTH_LDAP_TLS_CACERTFILE: ${AUTH_LDAP_TLS_CACERTFILE:-/opt/airflow/certs/root_2022_ca.pem}
+    AUTH_LDAP_TLS_CACERTFILE: ${AUTH_LDAP_TLS_CACERTFILE}
     UV_CACHE_DIR: /opt/airflow/cache/uv
     VAULT_ADDR: ${VAULT_ADDR}
-    VAULT_CACERT: /opt/airflow/certs/puppet_ca.pem
+    VAULT_CACERT: /etc/ssl/certs/ca-certificates.crt
     # The following line can be used to set a custom config file, stored in the local config folder
     # If you want to use it, outcomment it and replace airflow.cfg with the name of your config file
     # AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
@@ -100,8 +100,7 @@ x-airflow-common:
     - airflow-logs-volume:/opt/airflow/logs
     - airflow-venv-volume:/opt/airflow/venv
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
-    - /etc/ssl/certs/puppet_ca.pem:/opt/airflow/certs/puppet_ca.pem:ro
-    - /etc/ssl/certs/root_2022_ca.pem:/opt/airflow/certs/root_2022_ca.pem:ro
+    - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on
@@ -130,6 +129,8 @@ services:
       - 5432:5432
     labels:
       - "traefik.enable=true"
+      - "traefik.tcp.routers.postgres-outputs.rule=HostSNI(`postgres.${DOMAIN}`)"
+      - "traefik.tcp.routers.postgres-outputs.tls=true"
       - "traefik.tcp.routers.postgres-outputs.entrypoints=postgres"
       - "traefik.tcp.routers.postgres-outputs.service=postgres-outputs"
       - "traefik.tcp.services.postgres-outputs.loadbalancer.server.port=5432"
@@ -188,7 +189,7 @@ services:
     labels:
       - "checkmk_monitor=true"
       - "traefik.enable=true"
-      - "traefik.http.routers.airflow.rule=Host(`airflow.nuc10i7fnh.home.arpa`)"
+      - "traefik.http.routers.airflow.rule=Host(`airflow.${DOCKER_DOMAIN}`)"
       - "traefik.http.routers.airflow.entrypoints=https"
       - "traefik.http.routers.airflow.middlewares=secured@file"
       - "traefik.http.routers.airflow.tls=true"
