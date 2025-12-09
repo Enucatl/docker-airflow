@@ -206,6 +206,8 @@ services:
       retries: 5
       start_period: 30s
     restart: always
+    environment:
+      - AIRFLOW__CORE__LOGGING_LEVEL=WARNING
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
