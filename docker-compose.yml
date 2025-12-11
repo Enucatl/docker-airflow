@@ -53,6 +53,8 @@ x-airflow-common:
   build:
     context: ./build
     dockerfile: Dockerfile
+    args:
+      - AIRFLOW_VERSION
   networks:
     - traefik_proxy
   environment:
