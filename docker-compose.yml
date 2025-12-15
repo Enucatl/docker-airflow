@@ -85,7 +85,7 @@ x-airflow-common:
         "url": "${VAULT_ADDR}",
         "username": "airflow",
         "variables_path": "airflow/variables",
-        "verify": "/etc/ssl/certs/ca-certificates.crt"
+        "verify": "${VAULT_CACERT}"
       }
     AIRFLOW__SMTP__SMTP_HOST: ${AIRFLOW__SMTP__SMTP_HOST}
     AIRFLOW__SMTP__SMTP_MAIL_FROM: ${AIRFLOW__SMTP__SMTP_MAIL_FROM}
@@ -96,9 +96,10 @@ x-airflow-common:
     AIRFLOW_LDAP_PASSWORD: ${AIRFLOW_LDAP_PASSWORD}
     AUTH_LDAP_SERVER: ${AUTH_LDAP_SERVER}
     AUTH_LDAP_TLS_CACERTFILE: ${AUTH_LDAP_TLS_CACERTFILE}
+    SSL_CERT_FILE: ${VAULT_CACERT}
     UV_CACHE_DIR: /opt/airflow/cache/uv
     VAULT_ADDR: ${VAULT_ADDR}
-    VAULT_CACERT: /etc/ssl/certs/ca-certificates.crt
+    VAULT_CACERT: ${VAULT_CACERT}
     # The following line can be used to set a custom config file, stored in the local config folder
     # If you want to use it, outcomment it and replace airflow.cfg with the name of your config file
     # AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
@@ -214,7 +215,8 @@ services:
       start_period: 30s
     restart: always
     environment:
-      - AIRFLOW__CORE__LOGGING_LEVEL=WARNING
+      <<: *airflow-common-env
+      AIRFLOW__CORE__LOGGING_LEVEL: WARNING
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:

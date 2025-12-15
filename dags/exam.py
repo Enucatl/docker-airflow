@@ -5,9 +5,9 @@ from typing import List, Dict
 
 
 from airflow import DAG
-from airflow.decorators import task
 from playwright.sync_api import sync_playwright, Page
-from airflow.hooks.base import BaseHook
+from airflow.sdk import task
+from airflow.sdk.bases.hook import BaseHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 
 from common.defaults import default_args
