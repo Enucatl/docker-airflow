@@ -1,8 +1,8 @@
 from datetime import datetime, timedelta
 
 from airflow import DAG
-from airflow.decorators import task
-from airflow.hooks.base import BaseHook
+from airflow.sdk import task
+from airflow.sdk.bases.hook import BaseHook
 
 
 default_args = {
@@ -29,7 +29,7 @@ with DAG(
         requirements=[],
     )
     def test_virtualenv(logical_date):
-        from airflow.hooks.base import BaseHook
+        from airflow.sdk.bases.hook import BaseHook
 
         connection = BaseHook.get_connection("stva")
         print(connection.host)

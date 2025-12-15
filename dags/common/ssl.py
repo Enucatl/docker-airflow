@@ -1,1 +1,1 @@
-verify = "/opt/airflow/certs/puppet_ca.pem"
+verify = "/etc/ssl/certs/ca-certificates.crt"
