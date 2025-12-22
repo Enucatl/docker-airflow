@@ -67,11 +67,18 @@ x-airflow-common:
     AIRFLOW__CELERY__BROKER_URL: redis://:@airflow-redis-1:6379/0
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:${POSTGRES_PASSWORD}@postgres/airflow
     AIRFLOW__CELERY__SYNC_PARALLELISM: 2
-    AIRFLOW__CELERY__WORKER_AUTOSCALE: '8,1'
+    AIRFLOW__CELERY__WORKER_AUTOSCALE: '2,1'
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__PARALLELISM: 2
+    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: 2
+    AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: 300
+    AIRFLOW__SCHEDULER__DAG_DIR_LIST_INTERVAL: 300
+    AIRFLOW__SCHEDULER__PARSING_PROCESSES: 1
+    AIRFLOW__SCHEDULER__STANDALONE_DAG_PROCESSOR: 'false'
+    AIRFLOW__WEBSERVER__WORKERS: 1
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${POSTGRES_PASSWORD}@postgres/airflow
     AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: 'false'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
@@ -204,24 +211,6 @@ services:
       - "traefik.http.routers.airflow.tls=true"
       - "traefik.http.routers.airflow.service=airflow"
       - "traefik.http.services.airflow.loadbalancer.server.port=8080"
-
-  airflow-dag-processor:
-    <<: *airflow-common
-    command: dag-processor
-    healthcheck:
-      test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    restart: always
-    environment:
-      <<: *airflow-common-env
-      AIRFLOW__CORE__LOGGING_LEVEL: WARNING
-    depends_on:
-      <<: *airflow-common-depends-on
-      airflow-init:
-        condition: service_completed_successfully
 
   airflow-scheduler:
     <<: *airflow-common
