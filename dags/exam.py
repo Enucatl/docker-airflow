@@ -47,11 +47,13 @@ def scrape_current_week(
 
             for slot in time_slots:
                 appointment_time = slot.inner_text()
-                appointments_in_week.append({
-                    "location": location_name,
-                    "date": date.strip(),
-                    "time": appointment_time.strip(),
-                })
+                appointments_in_week.append(
+                    {
+                        "location": location_name,
+                        "date": date.strip(),
+                        "time": appointment_time.strip(),
+                    }
+                )
         except Exception as e:
             logger.warning(
                 f"Could not parse a day's appointments, even though it seemed to have slots. Error: {e}"
