@@ -287,7 +287,11 @@ services:
     <<: *airflow-common
     extends:
       file: ../compose-security-baseline/hardening.yml
-      service: root-chown-init
+      service: hardened-small
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
     entrypoint: /bin/bash
     # yamllint disable rule:line-length
     command:
