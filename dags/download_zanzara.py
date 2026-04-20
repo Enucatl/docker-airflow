@@ -35,7 +35,11 @@ with DAG(
             "requests",
         ],
     )
-    def download(prev_data_interval_start_success, data_interval_end, params):
+    def download(
+        prev_data_interval_start_success,
+        data_interval_start,
+        data_interval_end,
+    ):
         """
         Determines if this is a Scheduled run or a Manual Range run.
         """
@@ -45,9 +49,11 @@ with DAG(
         import requests
         import subprocess
 
-        from airflow.exceptions import AirflowSkipException
+        from airflow.sdk import get_current_context
+        from airflow.sdk.exceptions import AirflowSkipException
 
         logger = logging.getLogger(__name__)
+        params = get_current_context()["params"]
 
         def download_and_convert_single_day(
             target_date: datetime, overwrite: bool = False
@@ -135,7 +141,7 @@ with DAG(
         print(f"{date_from=}, {date_to=}")
 
         if date_from is None:
-            date_from = prev_data_interval_start_success
+            date_from = prev_data_interval_start_success or data_interval_start
         else:
             date_from = datetime.strptime(date_from, "%Y-%m-%d").replace(
                 tzinfo=timezone.utc

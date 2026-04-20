@@ -96,18 +96,13 @@ x-airflow-common:
         "variables_path": "airflow/variables",
         "verify": "${VAULT_CACERT}"
       }
-    AIRFLOW__SMTP__SMTP_HOST: ${AIRFLOW__SMTP__SMTP_HOST}
-    AIRFLOW__SMTP__SMTP_MAIL_FROM: ${AIRFLOW__SMTP__SMTP_MAIL_FROM}
-    AIRFLOW__SMTP__SMTP_PASSWORD: ${AIRFLOW__SMTP__SMTP_PASSWORD}
-    AIRFLOW__SMTP__SMTP_PORT: 10125
-    AIRFLOW__SMTP__SMTP_USER: ${AIRFLOW__SMTP__SMTP_USER}
     AIRFLOW__FAB__CONFIG_FILE: '/opt/airflow/config/webserver_config.py'
     AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
     AIRFLOW_LDAP_PASSWORD: ${AIRFLOW_LDAP_PASSWORD}
     AUTH_LDAP_SERVER: ${AUTH_LDAP_SERVER}
     AUTH_LDAP_TLS_CACERTFILE: ${AUTH_LDAP_TLS_CACERTFILE}
     SSL_CERT_FILE: ${VAULT_CACERT}
-    UV_CACHE_DIR: /opt/airflow/cache/uv
+    UV_CACHE_DIR: /opt/airflow/venv/cache/uv
     VAULT_ADDR: ${VAULT_ADDR}
     VAULT_CACERT: ${VAULT_CACERT}
     # The following line can be used to set a custom config file, stored in the local config folder

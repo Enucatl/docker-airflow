@@ -1,17 +1,24 @@
 from datetime import datetime
 
+from airflow.providers.smtp.notifications.smtp import SmtpNotifier
 from airflow.sdk import DAG
 from airflow.providers.http.operators.http import HttpOperator
+
+from common.defaults import ALERT_FROM, ALERT_TO, SMTP_CONN_ID
 
 HTTP_CONN_ID = "bills_api"
 
 # Define default arguments for the DAG
-default_args = {
+default_args: dict[str, object] = {
     "retries": 0,
     "depends_on_past": False,
-    "email_on_retry": False,
-    "email_on_failure": True,
 }
+
+default_args["on_failure_callback"] = SmtpNotifier(
+    to=ALERT_TO,
+    from_email=ALERT_FROM,
+    smtp_conn_id=SMTP_CONN_ID,
+)
 
 with DAG(
     dag_id="billing",
