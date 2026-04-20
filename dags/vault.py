@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from airflow import DAG
+from airflow.sdk import DAG
 from airflow.decorators import task
 
 from common.defaults import default_args

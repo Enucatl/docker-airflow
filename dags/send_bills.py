@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from airflow.models.dag import DAG
+from airflow.sdk import DAG
 from airflow.providers.http.operators.http import HttpOperator
 
 HTTP_CONN_ID = "bills_api"

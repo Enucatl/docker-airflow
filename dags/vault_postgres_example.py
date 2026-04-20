@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from airflow import DAG
+from airflow.sdk import DAG
 from airflow.providers.common.sql.operators.sql import SQLExecuteQueryOperator
 
 with DAG(

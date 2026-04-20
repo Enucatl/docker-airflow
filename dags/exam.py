@@ -4,7 +4,7 @@ import logging
 from typing import List, Dict
 
 
-from airflow import DAG
+from airflow.sdk import DAG
 from playwright.sync_api import sync_playwright, Page
 from airflow.sdk import task
 from airflow.sdk.bases.hook import BaseHook
