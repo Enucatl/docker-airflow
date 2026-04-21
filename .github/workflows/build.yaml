@@ -33,14 +33,14 @@ jobs:
 
           airflow_version="$(cat build/VERSION)"
           short_sha="$(git rev-parse --short HEAD)"
-          version="${airflow_version}-${GITHUB_SHA}-build"
+          version="${airflow_version}-${short_sha}"
 
           {
             echo "airflow_version=${airflow_version}"
             echo "version=${version}"
             echo "meta_tags<<EOF"
             echo "type=raw,value=${version}"
-            echo "type=raw,value=${short_sha}-build"
+            echo "type=raw,value=${short_sha}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
 
