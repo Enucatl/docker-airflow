@@ -57,7 +57,7 @@ jobs:
       version: ${{ needs.prepare.outputs.version }}
       meta_tags: ${{ needs.prepare.outputs.meta_tags }}
       context: ./build
-      dockerfile: ./build/Dockerfile
+      dockerfile: Dockerfile
       platforms: linux/amd64
       push: ${{ github.event_name != 'pull_request' }}
       build_args: |
