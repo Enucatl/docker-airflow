@@ -35,4 +35,4 @@ vault kv put kv/airflow/connections/smtp_default \
 ```
 
 This creates the `smtp_default` connection Airflow uses for SMTP authentication.
-The alert sender and recipient are set in the DAG code:
+The alert sender and recipient are set in the DAG code.
