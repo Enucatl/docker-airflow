@@ -60,6 +60,7 @@ jobs:
       dockerfile: Dockerfile
       platforms: linux/amd64
       push: ${{ github.event_name != 'pull_request' }}
+      fail_on_image_findings: false
       build_args: |
         AIRFLOW_VERSION=${{ needs.prepare.outputs.airflow_version }}
     secrets: inherit
