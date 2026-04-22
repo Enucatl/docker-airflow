@@ -165,6 +165,7 @@ services:
     volumes:
       - postgres-db-volume:/var/lib/postgresql/
     networks:
+      - default
       - traefik_proxy
 
   redis:
@@ -293,6 +294,8 @@ services:
   airflow-init:
     <<: *airflow-common
     entrypoint: /bin/bash
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
     command:
       - -c
       - |
@@ -359,6 +362,7 @@ services:
         echo "Files in shared volumes:"
         echo
         ls -la /opt/airflow/{logs,dags,config}
+    restart: no
 
     # yamllint enable rule:line-length
     environment:
