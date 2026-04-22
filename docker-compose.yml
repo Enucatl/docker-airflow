@@ -58,8 +58,6 @@ x-airflow-common:
     dockerfile: Dockerfile
     args:
       - AIRFLOW_VERSION
-  networks:
-    - traefik_proxy
   environment:
     &airflow-common-env
     AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET}
@@ -149,6 +147,7 @@ services:
       - "traefik.tcp.routers.postgres-outputs.service=postgres-outputs"
       - "traefik.tcp.services.postgres-outputs.loadbalancer.server.port=5432"
     networks:
+      - default
       - traefik_proxy
 
   postgres:
@@ -186,7 +185,6 @@ services:
       start_period: 30s
     volumes:
       - redis-data:/data
-    restart: always
     networks:
       - traefik_proxy
 
@@ -200,7 +198,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    restart: always
     environment:
       <<: *airflow-common-env
     depends_on:
@@ -216,6 +213,9 @@ services:
       - "traefik.http.routers.airflow.tls=true"
       - "traefik.http.routers.airflow.service=airflow"
       - "traefik.http.services.airflow.loadbalancer.server.port=8080"
+    networks:
+      - default
+      - traefik_proxy
 
   airflow-scheduler:
     <<: *airflow-common
@@ -227,7 +227,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    restart: always
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -243,7 +242,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    restart: always
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -270,7 +268,6 @@ services:
       # Required to handle warm shutdown of the celery workers properly
       # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
       DUMB_INIT_SETSID: "0"
-    restart: always
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -288,7 +285,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    restart: always
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -403,7 +399,6 @@ services:
       timeout: 10s
       retries: 5
       start_period: 30s
-    restart: always
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -417,5 +412,7 @@ volumes:
   airflow-venv-volume:
 
 networks:
+  default:
+    internal: true
   traefik_proxy:
     external: true
