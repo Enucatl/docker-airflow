@@ -331,9 +331,7 @@ def render_plaintext_report(
         "",
         "Coding Agent Instruction",
         "",
-        "You are working in ../puppet-control-repo.",
-        "Go to provisioning and open "
-        "provisioning/templates/app_configs/suricata-disable.conf.j2.",
+        "Open provisioning/templates/app_configs/suricata-disable.conf.j2.",
         "Add the ignore rules below.",
         "Keep the reason comment and the run_id provenance with each rule.",
         "",
