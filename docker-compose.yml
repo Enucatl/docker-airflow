@@ -49,6 +49,8 @@ x-airflow-common:
   extends:
     file: ../compose-security-baseline/hardening.yml
     service: hardened-large
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,size=32m,mode=770,uid=${AIRFLOW_UID:-50000},gid=0
   # In order to add custom dependencies or upgrade provider packages you can use your extended image.
   # Comment the image line, place your Dockerfile in the directory where you placed the docker-compose.yaml
   # and uncomment the "build" line below, Then run `docker-compose build` to build the images.
@@ -65,7 +67,7 @@ x-airflow-common:
     AIRFLOW__API__WORKERS: 1
     AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
     AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
-    AIRFLOW__CELERY__BROKER_URL: redis://:@airflow-redis-1:6379/0
+    AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:${POSTGRES_PASSWORD}@postgres/airflow
     AIRFLOW__CELERY__SYNC_PARALLELISM: 2
     AIRFLOW__CELERY__WORKER_AUTOSCALE: '2,1'
@@ -94,6 +96,8 @@ x-airflow-common:
         "variables_path": "airflow/variables",
         "verify": "${VAULT_CACERT}"
       }
+    PHOENIX_COLLECTOR_ENDPOINT: ${PHOENIX_COLLECTOR_ENDPOINT:-http://phoenix:6006/v1/traces}
+    PHOENIX_PROJECT_NAME: ${PHOENIX_PROJECT_NAME:-cyber_analyst}
     AIRFLOW__FAB__CONFIG_FILE: '/opt/airflow/config/webserver_config.py'
     AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
     AIRFLOW_LDAP_PASSWORD: ${AIRFLOW_LDAP_PASSWORD}
@@ -187,14 +191,12 @@ services:
     volumes:
       - redis-data:/data
     networks:
-      - traefik_proxy
+      - default
 
   airflow-apiserver:
     <<: *airflow-common
     command: api-server
     cpu_shares: 512
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/version"]
       interval: 30s
@@ -210,6 +212,7 @@ services:
     labels:
       - "checkmk_monitor=true"
       - "traefik.enable=true"
+      - "traefik.docker.network=traefik_proxy"
       - "traefik.http.routers.airflow.rule=Host(`airflow.${DOCKER_DOMAIN}`)"
       - "traefik.http.routers.airflow.entrypoints=https"
       - "traefik.http.routers.airflow.middlewares=secured@file"
@@ -277,6 +280,9 @@ services:
         condition: service_completed_successfully
       airflow-apiserver:
         condition: service_healthy 
+    networks:
+      - default
+      - traefik_proxy
 
   airflow-triggerer:
     <<: *airflow-common
@@ -296,8 +302,6 @@ services:
   airflow-init:
     <<: *airflow-common
     entrypoint: /bin/bash
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
     command:
       - -c
       - |
@@ -388,6 +392,9 @@ services:
       - airflow
     depends_on:
       <<: *airflow-common-depends-on
+    networks:
+      - default
+      - traefik_proxy
 
   # You can enable flower by adding "--profile flower" option e.g. docker-compose --profile flower up
   # or by explicitly targeted on the command line e.g. docker-compose up flower.
@@ -419,6 +426,5 @@ volumes:
 
 networks:
   default:
-    internal: true
   traefik_proxy:
     external: true

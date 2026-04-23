@@ -8,7 +8,7 @@ ALERT_TO = "m.app.logins@pm.me"
 
 default_args: dict[str, object] = {
     "depends_on_past": False,
-    "retries": 1,
+    "retries": 0,
     "retry_delay": timedelta(minutes=30),
     "venv_cache_path": "/opt/airflow/venv",
 }

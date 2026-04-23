@@ -1,0 +1,21 @@
+[project]
+name = "airflow-dags"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+[dependency-groups]
+dev = [
+  "apache-airflow==3.2.0",
+  "apache-airflow-providers-smtp",
+  "pytest",
+  "ruff",
+]
+
+[tool.pytest.ini_options]
+pythonpath = [
+  ".",
+  "dags",
+]
+testpaths = [
+  "tests",
+]
