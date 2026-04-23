@@ -231,15 +231,18 @@ def run_signature_agent(
     }
 
 
-
-
 def render_plaintext_report(
     *,
+    run_id: str | None = None,
     window_start: datetime,
     window_end: datetime,
     analyses: list[dict[str, Any]],
 ) -> str:
+    run_id_line = f"run_id={run_id}" if run_id else "run_id=unknown"
+
     lines = [
+        run_id_line,
+        "",
         "Monthly Suricata AI Triage",
         "",
         (
@@ -272,6 +275,7 @@ def render_plaintext_report(
             f"- {signature_result['signature']}: {signature_result['reasoning_summary']}"
         )
         for candidate in signature_result["suppression_candidates"]:
+            lines.append(f"  # {candidate['scope_reason']}")
             lines.append(f"  threshold.config: {candidate['rule_line']}")
 
     analyzed = [
@@ -322,6 +326,37 @@ def render_plaintext_report(
     else:
         for warning in unresolved:
             lines.append(f"- {warning}")
+
+    instruction_lines = [
+        "",
+        "Coding Agent Instruction",
+        "",
+        "You are working in ../puppet-control-repo.",
+        "Go to provisioning and open "
+        "provisioning/templates/app_configs/suricata-disable.conf.j2.",
+        "Add the ignore rules below.",
+        "Keep the reason comment and the run_id provenance with each rule.",
+        "",
+        f"Provenance: {run_id_line}",
+        "",
+    ]
+    if not ignored:
+        instruction_lines.append("No ignore rules were generated for this report.")
+    else:
+        for analysis in ignored:
+            signature_result = analysis["signature_result"]
+            instruction_lines.append(
+                f"- {signature_result['signature']}: {signature_result['reasoning_summary']}"
+            )
+            for candidate in signature_result["suppression_candidates"]:
+                instruction_lines.append(
+                    f"  # run_id={run_id or 'unknown'} | {candidate['scope_reason']}"
+                )
+                instruction_lines.append(
+                    f"  threshold.config: {candidate['rule_line']}"
+                )
+
+    lines.extend(instruction_lines)
 
     return "\n".join(lines)
 

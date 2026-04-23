@@ -270,6 +270,7 @@ def test_build_suppression_candidates() -> None:
 
 def test_render_report_ignore_only() -> None:
     report = render_plaintext_report(
+        run_id="manual__2026-04-23T14:25:42.202385+00:00",
         window_start=datetime(2026, 3, 1, tzinfo=UTC),
         window_end=datetime(2026, 4, 1, tzinfo=UTC),
         analyses=[
@@ -294,13 +295,21 @@ def test_render_report_ignore_only() -> None:
         ],
     )
 
+    assert report.startswith(
+        "run_id=manual__2026-04-23T14:25:42.202385+00:00\n\nMonthly Suricata AI Triage"
+    )
     assert "Ignored Signatures" in report
+    assert "  # Routine." in report
     assert "threshold.config: suppress gen_id 1, sig_id 1001" in report
+    assert "Coding Agent Instruction" in report
+    assert "provisioning/templates/app_configs/suricata-disable.conf.j2" in report
+    assert "  # run_id=manual__2026-04-23T14:25:42.202385+00:00 | Routine." in report
     assert "Signatures Analyzed Individually\n- None" in report
 
 
 def test_render_report_mixed_with_failed_lookups() -> None:
     report = render_plaintext_report(
+        run_id="manual__2026-04-23T14:25:42.202385+00:00",
         window_start=datetime(2026, 3, 1, tzinfo=UTC),
         window_end=datetime(2026, 4, 1, tzinfo=UTC),
         analyses=[
@@ -342,6 +351,7 @@ def test_render_report_mixed_with_failed_lookups() -> None:
     assert "Proof of Malware" in report
     assert "Isolate immediately." in report
     assert "GreyNoise lookup failed" in report
+    assert "Coding Agent Instruction" in report
 
 
 def test_rate_limit_warning_mentions_temporary_unavailability() -> None:

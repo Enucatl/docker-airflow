@@ -673,7 +673,10 @@ with DAG(
         }
 
     @task(task_id="render_email_report")
-    def render_email_report(analyzed: dict[str, object]) -> dict[str, str]:
+    def render_email_report(
+        analyzed: dict[str, object],
+        run_id: str | None = None,
+    ) -> dict[str, str]:
         import logging
 
         logger = logging.getLogger(__name__)
@@ -695,6 +698,7 @@ with DAG(
             test_mode,
         )
         body = render_plaintext_report(
+            run_id=run_id,
             window_start=window_start,
             window_end=window_end,
             analyses=analyses,
