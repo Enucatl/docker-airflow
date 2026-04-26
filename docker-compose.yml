@@ -48,7 +48,7 @@ x-airflow-common:
   &airflow-common
   extends:
     file: ../compose-security-baseline/hardening.yml
-    service: hardened-xxlarge
+    service: hardened-medium
   tmpfs:
     - /tmp:rw,noexec,nosuid,size=32m,mode=770,uid=${AIRFLOW_UID:-50000},gid=0
   # In order to add custom dependencies or upgrade provider packages you can use your extended image.
@@ -257,7 +257,7 @@ services:
     <<: *airflow-common
     extends:
       file: ../compose-security-baseline/hardening.yml
-      service: hardened-large
+      service: hardened-xxlarge
     command: celery worker
     cpu_shares: 512
     healthcheck:
