@@ -5,9 +5,12 @@ requires-python = ">=3.12"
 
 [dependency-groups]
 runtime = [
-  "apache-airflow==3.2.0",
+  "apache-airflow==3.2.1",
+  "apache-airflow-providers-fab",
+  "apache-airflow-providers-hashicorp",
   "apache-airflow-providers-smtp",
   "apache-airflow-providers-telegram",
+  "psycopg[binary]",
   "playwright",
 ]
 dev = [
