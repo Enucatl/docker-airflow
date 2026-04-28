@@ -1,16 +1,16 @@
+import html
 from datetime import datetime
 import json
 import logging
-from typing import List, Dict
+from typing import Dict, List
 
-
-from airflow.sdk import DAG
-from playwright.sync_api import sync_playwright, Page
-from airflow.sdk import task
-from airflow.sdk.bases.hook import BaseHook
 from airflow.providers.postgres.hooks.postgres import PostgresHook
+from airflow.sdk import DAG, task
+from airflow.sdk.bases.hook import BaseHook
+from playwright.sync_api import Page, sync_playwright
 
 from common.defaults import default_args
+from common.telegram import telegram_message_task
 
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,40 @@ def scrape_current_week(
             )
 
     return appointments_in_week
+
+
+def _appointment_sort_key(appointment: Dict) -> datetime:
+    return datetime.strptime(
+        f"{appointment['date']} {appointment['time']}", "%d.%m.%Y %H:%M"
+    )
+
+
+def render_appointments_for_telegram(scraped_appointments: list[Dict]) -> str:
+    if not scraped_appointments:
+        return "<b>No new exam dates found right now.</b>"
+
+    ordered_appointments = sorted(scraped_appointments, key=_appointment_sort_key)
+    lines = ["<b>Available exam dates</b>", ""]
+
+    for appointment in ordered_appointments:
+        lines.append(
+            "- <b>{location}</b>: {date} at {time}".format(
+                location=html.escape(appointment["location"]),
+                date=html.escape(appointment["date"]),
+                time=html.escape(appointment["time"]),
+            )
+        )
+
+    return "\n".join(lines)
+
+
+@task.skip_if(
+    lambda context: not context["ti"].xcom_pull(task_ids="update_database"),
+    skip_message="No new exam dates to send.",
+)
+@task
+def format_appointments_for_telegram(scraped_appointments: list[Dict]) -> str:
+    return render_appointments_for_telegram(scraped_appointments)
 
 
 with DAG(
@@ -186,7 +220,6 @@ with DAG(
                         page.locator(day_containers_selector).first.wait_for(
                             state="visible", timeout=15000
                         )
-                    break
             finally:
                 browser.close()
         return all_appointments
@@ -197,7 +230,7 @@ with DAG(
         appointment_table_name: str,
         log_table_name: str,
         data_interval_end: datetime,
-    ):
+    ) -> list[Dict]:
         """
         Performs the 'diff' logic and updates the database statefully.
         """
@@ -244,9 +277,17 @@ with DAG(
 
         # 4. Find new or re-opened appointments
         new_appointments = scraped_set - db_set
+        new_appointment_payloads: list[Dict] = []
         if new_appointments:
             logger.info(f"Found {len(new_appointments)} new or re-opened appointments.")
             for location, dt_obj in new_appointments:
+                new_appointment_payloads.append(
+                    {
+                        "location": location,
+                        "date": dt_obj.strftime("%d.%m.%Y"),
+                        "time": dt_obj.strftime("%H:%M"),
+                    }
+                )
                 # This "UPSERT" logic is key. It inserts a new appointment, but if a row
                 # with the same location/datetime already exists (the UNIQUE constraint),
                 # it updates the existing row instead.
@@ -259,10 +300,10 @@ with DAG(
                         last_seen_at = EXCLUDED.last_seen_at, -- Use the value from the attempted insert
                     became_unavailable_at = NULL;
                 """
-            pg_hook.run(
-                upsert_sql,
-                parameters=(location, dt_obj, data_interval_end, data_interval_end),
-            )
+                pg_hook.run(
+                    upsert_sql,
+                    parameters=(location, dt_obj, data_interval_end, data_interval_end),
+                )
 
         # 5. Update last_seen_at for appointments that are still available
         still_available = scraped_set.intersection(db_set)
@@ -302,6 +343,7 @@ with DAG(
             ),
         )
         logger.info("Database update complete and log finalized.")
+        return new_appointment_payloads
 
     # --- Define the DAG Structure ---
     # Create tables in parallel
@@ -316,8 +358,13 @@ with DAG(
 
     # Run the main workflow after tables are ready
     scraped_data = extract_appointments()
-    update_database(
+    update_database_task = update_database(
         scraped_data,
         create_appointments_table_task,
         create_log_table_task,
+    )
+    telegram_report = format_appointments_for_telegram(update_database_task)
+    send_telegram_report = telegram_message_task(
+        task_id="send_exam_dates",
+        text=telegram_report,
     )

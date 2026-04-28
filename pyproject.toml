@@ -8,12 +8,14 @@ runtime = [
   "apache-airflow==3.2.1",
   "apache-airflow-providers-fab",
   "apache-airflow-providers-hashicorp",
+  "apache-airflow-providers-postgres",
   "apache-airflow-providers-smtp",
   "apache-airflow-providers-telegram",
   "psycopg[binary]",
   "playwright",
 ]
 dev = [
+  { include-group = "runtime" },
   "pytest",
   "ruff",
 ]
