@@ -7,6 +7,7 @@
 
 ## Extra dependencies in the image
 
+- runtime dependencies are installed from `uv.lock`
 - python `playwright` for browser automation
 
 ## Security baseline
@@ -36,3 +37,19 @@ vault kv put kv/airflow/connections/smtp_default \
 
 This creates the `smtp_default` connection Airflow uses for SMTP authentication.
 The alert sender and recipient are set in the DAG code.
+
+## Telegram in Vault
+
+Airflow reads connections from the Vault path configured in `docker-compose.yml`:
+`kv/airflow/connections/<conn_id>`.
+
+To store a Telegram bot token and chat ID for the `telegram_default` connection, run:
+
+```bash
+vault kv put kv/airflow/connections/telegram_default \
+  conn_type="telegram" \
+  host="<chat_id>" \
+  password="<bot_token>"
+```
+
+`password` stores the bot token and `host` stores the chat, channel, or group ID.

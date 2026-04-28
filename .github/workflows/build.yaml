@@ -6,10 +6,14 @@ on:
       - main
     paths:
       - ".github/workflows/build.yaml"
+      - "pyproject.toml"
+      - "uv.lock"
       - "build/**"
   pull_request:
     paths:
       - ".github/workflows/build.yaml"
+      - "pyproject.toml"
+      - "uv.lock"
       - "build/**"
 
 jobs:
@@ -56,8 +60,8 @@ jobs:
       image_name: ghcr.io/enucatl/docker-airflow
       version: ${{ needs.prepare.outputs.version }}
       meta_tags: ${{ needs.prepare.outputs.meta_tags }}
-      context: ./build
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: build/Dockerfile
       platforms: linux/amd64
       push: ${{ github.event_name != 'pull_request' }}
       fail_on_image_findings: false
