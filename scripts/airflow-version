@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+from tomllib import load
+
+
+def main() -> int:
+    pyproject_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    with pyproject_path.open("rb") as f:
+        pyproject = load(f)
+
+    runtime_deps = pyproject.get("dependency-groups", {}).get("runtime", [])
+    airflow_deps = [dep for dep in runtime_deps if dep == "apache-airflow" or dep.startswith("apache-airflow==")]
+
+    if len(airflow_deps) != 1:
+        print(
+            f"expected exactly one apache-airflow dependency in {pyproject_path}, "
+            f"found {len(airflow_deps)}",
+            file=sys.stderr,
+        )
+        return 1
+
+    if not airflow_deps[0].startswith("apache-airflow=="):
+        print(
+            f"apache-airflow dependency must be exactly pinned in {pyproject_path}: {airflow_deps[0]}",
+            file=sys.stderr,
+        )
+        return 1
+
+    print(airflow_deps[0].split("==", 1)[1])
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

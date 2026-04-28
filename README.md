@@ -9,6 +9,13 @@
 
 - runtime dependencies are installed from `uv.lock`
 - python `playwright` for browser automation
+- Airflow version is read from `pyproject.toml` via `python3 scripts/airflow-version`
+
+## Building locally
+
+```bash
+AIRFLOW_VERSION="$(python3 scripts/airflow-version)" docker compose build
+```
 
 ## Security baseline
 

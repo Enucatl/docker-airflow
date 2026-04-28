@@ -56,8 +56,8 @@ x-airflow-common:
   # and uncomment the "build" line below, Then run `docker-compose build` to build the images.
   image: ghcr.io/enucatl/docker-airflow:main
   build:
-    context: ./build
-    dockerfile: Dockerfile
+    context: .
+    dockerfile: build/Dockerfile
     args:
       - AIRFLOW_VERSION
   environment:

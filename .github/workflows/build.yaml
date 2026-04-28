@@ -9,12 +9,14 @@ on:
       - "pyproject.toml"
       - "uv.lock"
       - "build/**"
+      - "scripts/**"
   pull_request:
     paths:
       - ".github/workflows/build.yaml"
       - "pyproject.toml"
       - "uv.lock"
       - "build/**"
+      - "scripts/**"
 
 jobs:
   prepare:
@@ -35,7 +37,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          airflow_version="$(cat build/VERSION)"
+          airflow_version="$(python3 scripts/airflow-version)"
           short_sha="$(git rev-parse --short HEAD)"
           version="${airflow_version}-${short_sha}"
 
