@@ -5,13 +5,7 @@ requires-python = ">=3.12"
 
 [dependency-groups]
 runtime = [
-  "apache-airflow==3.2.1",
-  "apache-airflow-providers-celery>=3.18.0",
-  "apache-airflow-providers-fab",
-  "apache-airflow-providers-hashicorp",
-  "apache-airflow-providers-postgres",
-  "apache-airflow-providers-smtp",
-  "apache-airflow-providers-telegram",
+  "apache-airflow[celery,fab,hashicorp,ldap,postgres,smtp,telegram]==3.2.1",
   "psycopg[binary]",
   "playwright",
 ]

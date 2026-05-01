@@ -59,6 +59,23 @@ def test_analyze_signatures_imports_loki_client_inside_virtualenv_task() -> None
     assert "alert.signature_id" not in source
 
 
+def test_collect_signatures_uses_previous_success_for_continuity() -> None:
+    source = Path("/opt/docker/airflow/dags/cyber_analyst.py").read_text()
+    module = ast.parse(source)
+
+    collect_signatures = next(
+        node
+        for node in ast.walk(module)
+        if isinstance(node, ast.FunctionDef) and node.name == "collect_signatures"
+    )
+    arg_names = [arg.arg for arg in collect_signatures.args.args]
+
+    assert "logical_date" in arg_names
+    assert "prev_data_interval_end_success" in arg_names
+    assert "window_start = parse_datetime(prev_data_interval_end_success)" in source
+    assert "window_end = parse_datetime(logical_date)" in source
+
+
 def test_previous_calendar_month_window() -> None:
     window_start, window_end = previous_calendar_month_window(
         datetime(2026, 4, 21, 10, 30, tzinfo=UTC)

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 from tomllib import load
+
+AIRFLOW_DEPENDENCY_RE = re.compile(r"^apache-airflow(?:\[.*])?==(.+)$")
 
 
 def main() -> int:
@@ -13,7 +16,7 @@ def main() -> int:
         pyproject = load(f)
 
     runtime_deps = pyproject.get("dependency-groups", {}).get("runtime", [])
-    airflow_deps = [dep for dep in runtime_deps if dep == "apache-airflow" or dep.startswith("apache-airflow==")]
+    airflow_deps = [dep for dep in runtime_deps if dep.startswith("apache-airflow")]
 
     if len(airflow_deps) != 1:
         print(
@@ -23,14 +26,15 @@ def main() -> int:
         )
         return 1
 
-    if not airflow_deps[0].startswith("apache-airflow=="):
+    airflow_dependency_match = AIRFLOW_DEPENDENCY_RE.fullmatch(airflow_deps[0])
+    if airflow_dependency_match is None:
         print(
             f"apache-airflow dependency must be exactly pinned in {pyproject_path}: {airflow_deps[0]}",
             file=sys.stderr,
         )
         return 1
 
-    print(airflow_deps[0].split("==", 1)[1])
+    print(airflow_dependency_match.group(1))
     return 0
 
 

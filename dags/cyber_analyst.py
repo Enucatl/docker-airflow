@@ -88,8 +88,8 @@ with DAG(
         ],
     )
     def collect_signatures(
-        data_interval_start=None,
-        data_interval_end=None,
+        logical_date=None,
+        prev_data_interval_end_success=None,
         params: dict[str, object] | None = None,
     ) -> dict[str, object]:
         import logging
@@ -135,9 +135,15 @@ with DAG(
         manual_start = params.get("window_start")
         manual_end = params.get("window_end")
         if manual_start is None and manual_end is None:
-            window_start = parse_datetime(data_interval_start)
-            window_end = parse_datetime(data_interval_end)
-            window_source = "data_interval"
+            if prev_data_interval_end_success is None:
+                raise ValueError(
+                    "prev_data_interval_end_success is required for scheduled "
+                    "continuity runs; provide window_start and window_end for "
+                    "the first run"
+                )
+            window_start = parse_datetime(prev_data_interval_end_success)
+            window_end = parse_datetime(logical_date)
+            window_source = "prev_data_interval_end_success_to_logical_date"
         elif manual_start is None or manual_end is None:
             raise ValueError(
                 "window_start and window_end must be provided together when overriding the window"
