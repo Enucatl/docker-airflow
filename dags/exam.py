@@ -100,7 +100,7 @@ with DAG(
     "exam",
     default_args=default_args,
     description="Scrape exam dates out of the Kanton Zurich website",
-    schedule="@daily",
+    schedule="@hourly",
     start_date=datetime(2025, 8, 17),
 ) as dag:
     appointment_table_name = f"{dag.dag_id}_appointment"

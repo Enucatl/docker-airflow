@@ -30,6 +30,7 @@ def test_exam_dag_exposes_telegram_notification_task() -> None:
     format_appointments = dag.get_task("format_appointments_for_telegram")
     send_exam_dates = dag.get_task("send_exam_dates")
 
+    assert dag.schedule == "@hourly"
     assert set(dag.task_ids) >= {
         "extract_appointments",
         "format_appointments_for_telegram",
