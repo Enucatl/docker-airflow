@@ -2,7 +2,8 @@ import html
 from datetime import datetime
 import json
 import logging
-from typing import Dict, List
+from typing import Dict, List, NamedTuple
+from zoneinfo import ZoneInfo
 
 from airflow.providers.postgres.hooks.postgres import PostgresHook
 from airflow.sdk import DAG, task
@@ -14,6 +15,65 @@ from common.telegram import telegram_message_task
 
 
 logger = logging.getLogger(__name__)
+
+
+AppointmentKey = tuple[str, datetime]
+APPOINTMENT_TIMEZONE = ZoneInfo("Europe/Zurich")
+
+
+def _parse_appointment_datetime(appointment: Dict) -> datetime:
+    appointment_datetime = datetime.strptime(
+        f"{appointment['date']} {appointment['time']}", "%d.%m.%Y %H:%M"
+    )
+    return appointment_datetime.replace(tzinfo=APPOINTMENT_TIMEZONE)
+
+
+def _appointment_key(location: str, appointment_datetime: datetime) -> AppointmentKey:
+    if appointment_datetime.tzinfo is None:
+        appointment_datetime = appointment_datetime.replace(tzinfo=APPOINTMENT_TIMEZONE)
+    return location, appointment_datetime
+
+
+class AppointmentChanges(NamedTuple):
+    unavailable: set[AppointmentKey]
+    newly_seen: set[AppointmentKey]
+    newly_available: set[AppointmentKey]
+    unnotified_available: set[AppointmentKey]
+
+
+def _split_appointment_changes(
+    scraped_set: set[AppointmentKey],
+    db_records: list[tuple[str, datetime, str, datetime | None]],
+) -> AppointmentChanges:
+    available_db_set = {
+        _appointment_key(location, appointment_datetime)
+        for location, appointment_datetime, status, _notified_at in db_records
+        if status == "available"
+    }
+    known_db_set = {
+        _appointment_key(location, appointment_datetime)
+        for location, appointment_datetime, _status, _notified_at in db_records
+    }
+    notified_db_set = {
+        _appointment_key(location, appointment_datetime)
+        for location, appointment_datetime, _status, notified_at in db_records
+        if notified_at is not None
+    }
+
+    return AppointmentChanges(
+        unavailable=available_db_set - scraped_set,
+        newly_seen=scraped_set - known_db_set,
+        newly_available=scraped_set - available_db_set,
+        unnotified_available=scraped_set - notified_db_set,
+    )
+
+
+def _appointment_payload(location: str, dt_obj: datetime) -> Dict:
+    return {
+        "location": location,
+        "date": dt_obj.strftime("%d.%m.%Y"),
+        "time": dt_obj.strftime("%H:%M"),
+    }
 
 
 def scrape_current_week(
@@ -63,9 +123,7 @@ def scrape_current_week(
 
 
 def _appointment_sort_key(appointment: Dict) -> datetime:
-    return datetime.strptime(
-        f"{appointment['date']} {appointment['time']}", "%d.%m.%Y %H:%M"
-    )
+    return _parse_appointment_datetime(appointment)
 
 
 def render_appointments_for_telegram(scraped_appointments: list[Dict]) -> str:
@@ -115,10 +173,15 @@ with DAG(
             status VARCHAR(20) NOT NULL CHECK (status IN ('available', 'unavailable')),
             first_seen_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
             last_seen_at TIMESTAMP WITH TIME ZONE,
+            notified_at TIMESTAMP WITH TIME ZONE,
             became_unavailable_at TIMESTAMP WITH TIME ZONE,
             -- This unique constraint is critical for our logic
             UNIQUE (location, appointment_datetime)
         );
+        ALTER TABLE {appointment_table_name}
+            ADD COLUMN IF NOT EXISTS notified_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+        ALTER TABLE {appointment_table_name}
+            ALTER COLUMN notified_at DROP DEFAULT;
         -- Create indexes for performance
         CREATE INDEX IF NOT EXISTS idx_{appointment_table_name}_status ON {appointment_table_name} (status);
         CREATE INDEX IF NOT EXISTS idx_{appointment_table_name}_datetime ON {appointment_table_name} (appointment_datetime);
@@ -248,19 +311,18 @@ with DAG(
         # We parse the date and time into a proper datetime object
         scraped_set = set()
         for appt in scraped_appointments:
-            dt_str = f"{appt['date']} {appt['time']}"
-            # DD.MM.YYYY HH:MI -> YYYY-MM-DD HH:MI:SS
-            dt_obj = datetime.strptime(dt_str, "%d.%m.%Y %H:%M")
-            scraped_set.add((appt["location"], dt_obj))
+            dt_obj = _parse_appointment_datetime(appt)
+            scraped_set.add(_appointment_key(appt["location"], dt_obj))
 
-        # Get currently available appointments from the DB
+        # Get all known appointments from the DB. Previously notified appointments
+        # should not be sent again when they re-open.
         db_records = pg_hook.get_records(
-            f"SELECT location, appointment_datetime FROM {appointment_table_name} WHERE status = 'available';"
+            f"SELECT location, appointment_datetime, status, notified_at FROM {appointment_table_name};"
         )
-        db_set = set((rec[0], rec[1]) for rec in db_records)
+        appointment_changes = _split_appointment_changes(scraped_set, db_records)
 
         # 3. Find newly unavailable appointments
-        unavailable_appointments = db_set - scraped_set
+        unavailable_appointments = appointment_changes.unavailable
         if unavailable_appointments:
             logger.info(
                 f"Found {len(unavailable_appointments)} appointments that are now unavailable."
@@ -275,19 +337,23 @@ with DAG(
                     parameters=(data_interval_end, location, dt_obj),
                 )
 
-        # 4. Find new or re-opened appointments
-        new_appointments = scraped_set - db_set
-        new_appointment_payloads: list[Dict] = []
-        if new_appointments:
-            logger.info(f"Found {len(new_appointments)} new or re-opened appointments.")
-            for location, dt_obj in new_appointments:
-                new_appointment_payloads.append(
-                    {
-                        "location": location,
-                        "date": dt_obj.strftime("%d.%m.%Y"),
-                        "time": dt_obj.strftime("%H:%M"),
-                    }
-                )
+        # 4. Find appointments that are available now but not currently marked available.
+        # Only appointments without a successful notification are returned.
+        newly_seen_appointments = appointment_changes.newly_seen
+        newly_available_appointments = appointment_changes.newly_available
+        new_appointment_payloads = [
+            _appointment_payload(location, dt_obj)
+            for location, dt_obj in appointment_changes.unnotified_available
+        ]
+        if appointment_changes.unnotified_available:
+            logger.info(
+                f"Found {len(appointment_changes.unnotified_available)} appointments that were never notified before."
+            )
+        if newly_available_appointments:
+            logger.info(
+                f"Found {len(newly_available_appointments)} new or re-opened appointments to mark available."
+            )
+            for location, dt_obj in newly_available_appointments:
                 # This "UPSERT" logic is key. It inserts a new appointment, but if a row
                 # with the same location/datetime already exists (the UNIQUE constraint),
                 # it updates the existing row instead.
@@ -306,7 +372,7 @@ with DAG(
                 )
 
         # 5. Update last_seen_at for appointments that are still available
-        still_available = scraped_set.intersection(db_set)
+        still_available = scraped_set - newly_available_appointments
         if still_available:
             # We can do this in a single, efficient query
             # Create a list of tuples for the WHERE IN clause
@@ -336,7 +402,7 @@ with DAG(
             parameters=(
                 data_interval_end,
                 len(scraped_appointments),
-                len(new_appointments),
+                len(newly_seen_appointments),
                 len(unavailable_appointments),
                 json.dumps(scraped_appointments),
                 log_id,
@@ -344,6 +410,31 @@ with DAG(
         )
         logger.info("Database update complete and log finalized.")
         return new_appointment_payloads
+
+    @task
+    def mark_appointments_notified(
+        notified_appointments: list[Dict],
+        appointment_table_name: str,
+        data_interval_end: datetime,
+    ) -> None:
+        if not notified_appointments:
+            return
+
+        pg_hook = PostgresHook(postgres_conn_id=postgres_conn_id)
+        notified_set = set()
+        for appt in notified_appointments:
+            dt_obj = _parse_appointment_datetime(appt)
+            notified_set.add((appt["location"], dt_obj))
+
+        pg_hook.run(
+            f"""
+            UPDATE {appointment_table_name}
+            SET notified_at = %s
+            WHERE (location, appointment_datetime) IN %s;
+            """,
+            parameters=(data_interval_end, list(notified_set)),
+        )
+        logger.info(f"Marked {len(notified_set)} appointments as notified.")
 
     # --- Define the DAG Structure ---
     # Create tables in parallel
@@ -368,3 +459,9 @@ with DAG(
         task_id="send_exam_dates",
         text=telegram_report,
     )
+    mark_notified_task = mark_appointments_notified(
+        update_database_task,
+        create_appointments_table_task,
+    )
+
+    send_telegram_report >> mark_notified_task
