@@ -373,17 +373,14 @@ with DAG(
 
         # 5. Update last_seen_at for appointments that are still available
         still_available = scraped_set - newly_available_appointments
-        if still_available:
-            # We can do this in a single, efficient query
-            # Create a list of tuples for the WHERE IN clause
-            where_in_tuples = list(still_available)
+        for location, dt_obj in still_available:
             pg_hook.run(
                 f"""
                 UPDATE {appointment_table_name}
                 SET last_seen_at = %s
-                WHERE (location, appointment_datetime) IN %s;
+                WHERE location = %s AND appointment_datetime = %s;
                 """,
-                parameters=(data_interval_end, where_in_tuples),
+                parameters=(data_interval_end, location, dt_obj),
             )
 
         # 6. Finalize the log entry with all the stats
@@ -426,14 +423,15 @@ with DAG(
             dt_obj = _parse_appointment_datetime(appt)
             notified_set.add((appt["location"], dt_obj))
 
-        pg_hook.run(
-            f"""
-            UPDATE {appointment_table_name}
-            SET notified_at = %s
-            WHERE (location, appointment_datetime) IN %s;
-            """,
-            parameters=(data_interval_end, list(notified_set)),
-        )
+        for location, dt_obj in notified_set:
+            pg_hook.run(
+                f"""
+                UPDATE {appointment_table_name}
+                SET notified_at = %s
+                WHERE location = %s AND appointment_datetime = %s;
+                """,
+                parameters=(data_interval_end, location, dt_obj),
+            )
         logger.info(f"Marked {len(notified_set)} appointments as notified.")
 
     # --- Define the DAG Structure ---
