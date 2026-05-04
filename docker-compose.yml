@@ -85,21 +85,22 @@ x-airflow-common:
     AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_ASYNC: postgresql+psycopg://airflow:${POSTGRES_PASSWORD}@postgres/airflow
     AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: 'false'
     AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
-    AIRFLOW__SECRETS__BACKEND: airflow.providers.hashicorp.secrets.vault.VaultBackend
+    AIRFLOW__SECRETS__BACKEND: airflow_utilities.vault_backend.CertVaultBackend
     AIRFLOW__SECRETS__BACKEND_KWARGS: |
       {
-        "auth_type": "ldap",
+        "auth_mount_point": "cert",
+        "cert": [
+          "/run/secrets/fullchain",
+          "/run/secrets/key"
+        ],
         "connections_path": "airflow/connections",
         "mount_point": "kv",
-        "password": "${AIRFLOW_LDAP_PASSWORD}",
         "url": "${VAULT_ADDR}",
-        "username": "airflow",
         "variables_path": "airflow/variables",
         "verify": "${VAULT_CACERT}"
       }
     AIRFLOW__FAB__CONFIG_FILE: '/opt/airflow/config/webserver_config.py'
     AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
-    AIRFLOW_LDAP_PASSWORD: ${AIRFLOW_LDAP_PASSWORD}
     AUTH_LDAP_SERVER: ${AUTH_LDAP_SERVER}
     AUTH_LDAP_TLS_CACERTFILE: ${AUTH_LDAP_TLS_CACERTFILE}
     SSL_CERT_FILE: ${VAULT_CACERT}
@@ -116,6 +117,9 @@ x-airflow-common:
     - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
     - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt
     - /scratch/archive:/scratch/archive
+  secrets:
+    - fullchain
+    - key
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     &airflow-common-depends-on
@@ -273,14 +277,11 @@ services:
       PHOENIX_COLLECTOR_ENDPOINT: ${PHOENIX_COLLECTOR_ENDPOINT:-https://phoenix-otlp.${DOCKER_DOMAIN}/v1/traces}
       PHOENIX_PROJECT_NAME: ${PHOENIX_PROJECT_NAME:-cyber_analyst}
       OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE: /etc/ssl/certs/ca-certificates.crt
-      OTEL_EXPORTER_OTLP_TRACES_CLIENT_CERTIFICATE: /run/secrets/airflow_worker_fullchain
-      OTEL_EXPORTER_OTLP_TRACES_CLIENT_KEY: /run/secrets/airflow_worker_key
+      OTEL_EXPORTER_OTLP_TRACES_CLIENT_CERTIFICATE: /run/secrets/fullchain
+      OTEL_EXPORTER_OTLP_TRACES_CLIENT_KEY: /run/secrets/key
       # Required to handle warm shutdown of the celery workers properly
       # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
       DUMB_INIT_SETSID: "0"
-    secrets:
-      - airflow_worker_fullchain
-      - airflow_worker_key
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -437,7 +438,7 @@ networks:
     external: true
 
 secrets:
-  airflow_worker_fullchain:
-    file: ./secrets/airflow-worker_fullchain.pem
-  airflow_worker_key:
-    file: ./secrets/airflow-worker_key.pem
+  fullchain:
+    file: ./secrets/fullchain.pem
+  key:
+    file: ./secrets/key.pem
