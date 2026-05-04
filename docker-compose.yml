@@ -97,8 +97,6 @@ x-airflow-common:
         "variables_path": "airflow/variables",
         "verify": "${VAULT_CACERT}"
       }
-    PHOENIX_COLLECTOR_ENDPOINT: ${PHOENIX_COLLECTOR_ENDPOINT:-http://phoenix:6006/v1/traces}
-    PHOENIX_PROJECT_NAME: ${PHOENIX_PROJECT_NAME:-cyber_analyst}
     AIRFLOW__FAB__CONFIG_FILE: '/opt/airflow/config/webserver_config.py'
     AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
     AIRFLOW_LDAP_PASSWORD: ${AIRFLOW_LDAP_PASSWORD}
@@ -272,9 +270,17 @@ services:
       start_period: 30s
     environment:
       <<: *airflow-common-env
+      PHOENIX_COLLECTOR_ENDPOINT: ${PHOENIX_COLLECTOR_ENDPOINT:-https://phoenix-otlp.${DOCKER_DOMAIN}/v1/traces}
+      PHOENIX_PROJECT_NAME: ${PHOENIX_PROJECT_NAME:-cyber_analyst}
+      OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE: /etc/ssl/certs/ca-certificates.crt
+      OTEL_EXPORTER_OTLP_TRACES_CLIENT_CERTIFICATE: /run/secrets/airflow_worker_fullchain
+      OTEL_EXPORTER_OTLP_TRACES_CLIENT_KEY: /run/secrets/airflow_worker_key
       # Required to handle warm shutdown of the celery workers properly
       # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
       DUMB_INIT_SETSID: "0"
+    secrets:
+      - airflow_worker_fullchain
+      - airflow_worker_key
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -429,3 +435,9 @@ networks:
   default:
   traefik_proxy:
     external: true
+
+secrets:
+  airflow_worker_fullchain:
+    file: ./secrets/airflow-worker_fullchain.pem
+  airflow_worker_key:
+    file: ./secrets/airflow-worker_key.pem
