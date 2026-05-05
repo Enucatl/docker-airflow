@@ -173,7 +173,6 @@ services:
       - postgres-db-volume:/var/lib/postgresql/
     networks:
       - default
-      - traefik_proxy
 
   redis:
     extends:
