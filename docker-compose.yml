@@ -227,6 +227,9 @@ services:
 
   airflow-scheduler:
     <<: *airflow-common
+    extends:
+      file: ../compose-security-baseline/hardening.yml
+      service: hardened-large
     command: scheduler
     cpu_shares: 512
     healthcheck:
@@ -242,6 +245,9 @@ services:
 
   airflow-dag-processor:
     <<: *airflow-common
+    extends:
+      file: ../compose-security-baseline/hardening.yml
+      service: hardened-large
     command: dag-processor
     cpu_shares: 512
     healthcheck:
