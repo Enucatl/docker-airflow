@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 import logging
 from typing import Any
 
@@ -47,6 +47,12 @@ def _count_loki_entries(results: list[dict[str, Any]]) -> int:
     return sum(len(result.get("values", [])) for result in results)
 
 
+def _as_utc_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        value = value.replace(tzinfo=UTC)
+    return datetime.fromtimestamp(value.timestamp(), tz=UTC)
+
+
 def query_loki_range_adaptive(
     conn_id: str,
     *,
@@ -59,6 +65,8 @@ def query_loki_range_adaptive(
     def fetch_window(
         window_start: datetime, window_end: datetime
     ) -> list[dict[str, Any]]:
+        window_start = _as_utc_datetime(window_start)
+        window_end = _as_utc_datetime(window_end)
         payload = query_loki_range(
             conn_id,
             query=query,
@@ -117,4 +125,4 @@ def query_loki_range_adaptive(
         right_results = fetch_window(next_start, window_end)
         return left_results + right_results
 
-    return fetch_window(start, end)
+    return fetch_window(_as_utc_datetime(start), _as_utc_datetime(end))

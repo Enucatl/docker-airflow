@@ -99,3 +99,44 @@ def test_query_loki_range_adaptive_splits_when_limit_hit(monkeypatch) -> None:
 
     assert len(calls) == 3
     assert sum(len(result["values"]) for result in results) == 4
+
+
+def test_query_loki_range_adaptive_normalizes_window_datetimes(monkeypatch) -> None:
+    calls: list[tuple[datetime, datetime, int]] = []
+
+    def fake_query_loki_range(
+        conn_id: str,
+        *,
+        query: str,
+        start: datetime,
+        end: datetime,
+        limit: int = 1000,
+    ) -> dict[str, object]:
+        calls.append((start, end, limit))
+        if len(calls) == 1:
+            return {
+                "data": {
+                    "result": [
+                        {
+                            "stream": {"chunk": "root"},
+                            "values": [
+                                [start.isoformat(), "line"] for _ in range(limit)
+                            ],
+                        }
+                    ]
+                }
+            }
+        return {"data": {"result": []}}
+
+    monkeypatch.setattr("common.loki.query_loki_range", fake_query_loki_range)
+
+    query_loki_range_adaptive(
+        "loki",
+        query='{job="suricata"}',
+        start=datetime(2026, 3, 1),
+        end=datetime(2026, 4, 1, tzinfo=UTC),
+        limit=5000,
+    )
+
+    assert len(calls) == 3
+    assert all(start.tzinfo == UTC and end.tzinfo == UTC for start, end, _ in calls)
