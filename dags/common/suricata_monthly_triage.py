@@ -106,6 +106,25 @@ def group_alerts_by_signature(rows: list[dict[str, Any]]) -> list[dict[str, Any]
     return groups
 
 
+def compact_signature_groups(
+    signature_groups: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    summary_fields = [
+        "signature",
+        "alert_count",
+        "categories",
+        "signature_ids",
+        "representative_categories",
+        "representative_signatures",
+        "first_seen",
+        "last_seen",
+    ]
+    return [
+        {field: signature_group[field] for field in summary_fields}
+        for signature_group in signature_groups
+    ]
+
+
 def build_signature_summary_for_llm(signature_group: dict[str, Any]) -> dict[str, Any]:
     return {
         "signature": signature_group["signature"],

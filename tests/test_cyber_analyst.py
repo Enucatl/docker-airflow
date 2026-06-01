@@ -8,6 +8,7 @@ from pathlib import Path
 from common.suricata_monthly_triage import (
     build_signature_summary_for_llm,
     build_suppression_candidates,
+    compact_signature_groups,
     extract_ipv4_identity,
     extract_ipv6_identity,
     group_alerts_by_signature,
@@ -31,10 +32,9 @@ def test_analyze_signatures_imports_loki_client_inside_virtualenv_task() -> None
         for node in ast.walk(module)
         if isinstance(node, ast.FunctionDef) and node.name == "analyze_signatures"
     )
-    query_suricata_context = next(
-        node
+    assert any(
+        isinstance(node, ast.FunctionDef) and node.name == "query_suricata_context"
         for node in ast.walk(analyze_signatures)
-        if isinstance(node, ast.FunctionDef) and node.name == "query_suricata_context"
     )
 
     assert any(
@@ -52,8 +52,15 @@ def test_analyze_signatures_imports_loki_client_inside_virtualenv_task() -> None
     assert any(
         isinstance(stmt, ast.ImportFrom)
         and stmt.module == "common.loki"
-        and any(alias.name == "query_loki_range" for alias in stmt.names)
+        and {alias.name for alias in stmt.names}
+        >= {"query_loki_range", "query_loki_range_adaptive"}
         for stmt in analyze_signatures.body
+    )
+    assert any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "query_loki_range_adaptive"
+        for node in ast.walk(analyze_signatures)
     )
     assert "alert_signature_id" in source
     assert "alert.signature_id" not in source
@@ -151,6 +158,41 @@ def test_build_signature_summary_for_llm_omits_alert_payloads() -> None:
         "first_seen": "2026-03-01T00:00:00+00:00",
         "last_seen": "2026-03-02T00:00:00+00:00",
     }
+
+
+def test_compact_signature_groups_omits_alert_payloads() -> None:
+    groups = compact_signature_groups(
+        [
+            {
+                "signature": "ET TEST",
+                "alert_count": 2,
+                "categories": ["Attempted Admin"],
+                "signature_ids": [2100001],
+                "representative_categories": ["Attempted Admin"],
+                "representative_signatures": ["ET TEST"],
+                "first_seen": "2026-03-01T00:00:00+00:00",
+                "last_seen": "2026-03-02T00:00:00+00:00",
+                "alerts": [{"raw_alert": {"secret": "payload"}}],
+                "example_alerts": [{"raw_alert": {"secret": "payload"}}],
+            }
+        ]
+    )
+
+    assert groups == [
+        {
+            "signature": "ET TEST",
+            "alert_count": 2,
+            "categories": ["Attempted Admin"],
+            "signature_ids": [2100001],
+            "representative_categories": ["Attempted Admin"],
+            "representative_signatures": ["ET TEST"],
+            "first_seen": "2026-03-01T00:00:00+00:00",
+            "last_seen": "2026-03-02T00:00:00+00:00",
+        }
+    ]
+    assert "alerts" not in groups[0]
+    assert "example_alerts" not in groups[0]
+    assert "raw_alert" not in str(groups)
 
 
 def test_extract_ipv4_identity() -> None:

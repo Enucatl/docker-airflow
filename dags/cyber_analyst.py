@@ -7,12 +7,7 @@ from airflow.providers.smtp.hooks.smtp import SmtpHook
 from airflow.sdk import DAG, Param, task
 
 from common.defaults import ALERT_FROM, ALERT_TO, SMTP_CONN_ID, default_args
-from common.loki import query_loki_range
-from common.suricata_monthly_triage import (
-    group_alerts_by_signature,
-    normalize_suricata_loki_response,
-    render_plaintext_report,
-)
+from common.suricata_monthly_triage import render_plaintext_report
 
 
 LOKI_CONN_ID = "loki"
@@ -102,6 +97,7 @@ with DAG(
 
         from common.loki import query_loki_range, query_loki_range_adaptive
         from common.suricata_monthly_triage import (
+            compact_signature_groups,
             group_alerts_by_signature,
             normalize_suricata_loki_response,
         )
@@ -201,7 +197,7 @@ with DAG(
         return {
             "window_start": window_start.isoformat(),
             "window_end": window_end.isoformat(),
-            "signatures": signature_groups,
+            "signatures": compact_signature_groups(signature_groups),
             "test_mode": test_mode,
         }
 
@@ -223,7 +219,7 @@ with DAG(
         from mac_vendor_lookup import MacLookup
         from pydantic import BaseModel, Field
         import requests
-        from common.loki import query_loki_range
+        from common.loki import query_loki_range, query_loki_range_adaptive
 
         LOKI_CONN_ID = "loki"
 
@@ -258,6 +254,7 @@ with DAG(
             extract_ipv4_identity,
             extract_ipv6_identity,
             infer_identity_lookup_version,
+            normalize_suricata_loki_response,
             run_signature_agent,
         )
 
@@ -347,6 +344,76 @@ with DAG(
                 alert_row.get("signature"),
             )
             return payload
+
+        def parse_collected_datetime(value: object) -> datetime:
+            if isinstance(value, datetime):
+                return value.astimezone(UTC)
+            text = str(value)
+            if text.endswith("Z"):
+                text = f"{text[:-1]}+00:00"
+            parsed = datetime.fromisoformat(text)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed.astimezone(UTC)
+
+        def signature_alert_query(signature_group: dict[str, object]) -> str:
+            signature_ids = list(signature_group.get("signature_ids", []))
+            query = '{job="suricata"} | json | event_type="alert"'
+            if len(signature_ids) == 1:
+                return f'{query} | alert_signature_id="{signature_ids[0]}"'
+            if len(signature_ids) > 1:
+                signature_id_pattern = "|".join(
+                    str(signature_id) for signature_id in signature_ids
+                )
+                return f'{query} | alert_signature_id=~"^({signature_id_pattern})$"'
+            return query
+
+        def rehydrate_signature_group(
+            signature_group: dict[str, object],
+        ) -> dict[str, object]:
+            query = signature_alert_query(signature_group)
+            signature_ids = {
+                int(signature_id)
+                for signature_id in signature_group.get("signature_ids", [])
+            }
+            signature = signature_group["signature"]
+            start = parse_collected_datetime(signature_group["first_seen"])
+            end = parse_collected_datetime(signature_group["last_seen"])
+            if end <= start:
+                end = start + timedelta(microseconds=1)
+            logger.info(
+                "Rehydrating alerts for signature=%s signature_ids=%s window=%s..%s query=%s",
+                signature,
+                sorted(signature_ids),
+                start.isoformat(),
+                end.isoformat(),
+                query,
+            )
+            loki_result = query_loki_range_adaptive(
+                LOKI_CONN_ID,
+                query=query,
+                start=start,
+                end=end,
+                limit=5000,
+                logger=logger,
+            )
+            rows = normalize_suricata_loki_response({"data": {"result": loki_result}})
+            alerts = [
+                row
+                for row in rows
+                if row["signature"] == signature
+                and (not signature_ids or row["signature_id"] in signature_ids)
+            ]
+            logger.info(
+                "Rehydrated %s alerts for signature=%s from %s normalized rows",
+                len(alerts),
+                signature,
+                len(rows),
+            )
+            rehydrated = dict(signature_group)
+            rehydrated["alerts"] = alerts
+            rehydrated["example_alerts"] = alerts[:5]
+            return rehydrated
 
         mac_lookup = MacLookup()
 
@@ -597,8 +664,9 @@ with DAG(
             return "analyze"
 
         def analyze_node(state: SignatureAgentState) -> SignatureAgentState:
+            signature_group = rehydrate_signature_group(state["signature_group"])
             result = run_signature_agent(
-                state["signature_group"],
+                signature_group,
                 decide_signature=lambda _group: state["signature_result"],
                 analyze_alert=analyze_one_alert,
             )
