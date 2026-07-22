@@ -295,7 +295,6 @@ services:
         condition: service_healthy 
     networks:
       - default
-      - traefik_proxy
 
   airflow-triggerer:
     <<: *airflow-common
@@ -410,7 +409,6 @@ services:
       <<: *airflow-common-depends-on
     networks:
       - default
-      - traefik_proxy
 
   # You can enable flower by adding "--profile flower" option e.g. docker-compose --profile flower up
   # or by explicitly targeted on the command line e.g. docker-compose up flower.
