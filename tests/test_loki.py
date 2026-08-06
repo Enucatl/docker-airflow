@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from common.loki import query_loki_range, query_loki_range_adaptive
+from common.loki import query_loki_range, query_loki_range_adaptive, set_vault
 
 
 def test_query_loki_range_uses_shared_ca_bundle(monkeypatch) -> None:
@@ -10,13 +10,14 @@ def test_query_loki_range_uses_shared_ca_bundle(monkeypatch) -> None:
         host = "https://loki.example"
         login = "user"
         password = "pass"
-        extra_dejson = {"tenant_id": "tenant-1"}
+        extra = {"tenant_id": "tenant-1"}
+
+    class DummyVault:
+        def get(self, conn_id: str) -> DummyConnection:
+            assert conn_id == "loki"
+            return DummyConnection()
 
     captured: dict[str, object] = {}
-
-    def fake_get_connection(conn_id: str) -> DummyConnection:
-        assert conn_id == "loki"
-        return DummyConnection()
 
     def fake_get(*args, **kwargs):
         captured["args"] = args
@@ -31,7 +32,7 @@ def test_query_loki_range_uses_shared_ca_bundle(monkeypatch) -> None:
 
         return Response()
 
-    monkeypatch.setattr("common.loki.BaseHook.get_connection", fake_get_connection)
+    set_vault(DummyVault())
     monkeypatch.setattr("common.loki.requests.get", fake_get)
 
     result = query_loki_range(

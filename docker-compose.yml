@@ -1,132 +1,27 @@
-# Licensed to the Apache Software Foundation (ASF) under one
-# or more contributor license agreements.  See the NOTICE file
-# distributed with this work for additional information
-# regarding copyright ownership.  The ASF licenses this file
-# to you under the Apache License, Version 2.0 (the
-# "License"); you may not use this file except in compliance
-# with the License.  You may obtain a copy of the License at
-#
-#   http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing,
-# software distributed under the License is distributed on an
-# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
-# KIND, either express or implied.  See the License for the
-# specific language governing permissions and limitations
-# under the License.
-#
-
-# Basic Airflow cluster configuration for CeleryExecutor with Redis and PostgreSQL.
-#
-# WARNING: This configuration is for local development. Do not use it in a production deployment.
-#
-# This configuration supports basic configuration using environment variables or an .env file
-# The following variables are supported:
-#
-# AIRFLOW_IMAGE_NAME           - Docker image name used to run Airflow.
-#                                Default: apache/airflow:2.10.3
-# AIRFLOW_UID                  - User ID in Airflow containers
-#                                Default: 50000
-# AIRFLOW_PROJ_DIR             - Base path to which all the files will be volumed.
-#                                Default: .
-# Those configurations are useful mostly in case of standalone testing/running Airflow in test/try-out mode
-#
-# _AIRFLOW_WWW_USER_USERNAME   - Username for the administrator account (if requested).
-#                                Default: airflow
-# _AIRFLOW_WWW_USER_PASSWORD   - Password for the administrator account (if requested).
-#                                Default: airflow
-# _PIP_ADDITIONAL_REQUIREMENTS - Additional PIP requirements to add when starting all containers.
-#                                Use this option ONLY for quick checks. Installing requirements at container
-#                                startup is done EVERY TIME the service is started.
-#                                A better way is to build a custom image or extend the official image
-#                                as described in https://airflow.apache.org/docs/docker-stack/build.html.
-#                                Default: ''
-#
-# Feel free to modify this file to suit your needs.
 ---
-x-airflow-common:
-  &airflow-common
+x-runner: &runner
   extends:
     file: ../compose-security-baseline/hardening.yml
-    service: hardened-medium
+    service: hardened-xxlarge
+  profiles: [runner]
+  init: true
   tmpfs:
-    - /tmp:rw,noexec,nosuid,size=32m,mode=770,uid=${AIRFLOW_UID:-50000},gid=0
-  # In order to add custom dependencies or upgrade provider packages you can use your extended image.
-  # Comment the image line, place your Dockerfile in the directory where you placed the docker-compose.yaml
-  # and uncomment the "build" line below, Then run `docker-compose build` to build the images.
-  image: ghcr.io/enucatl/docker-airflow:main
-  build:
-    context: .
-    dockerfile: build/Dockerfile
-    args:
-      - AIRFLOW_VERSION
-  environment:
-    &airflow-common-env
-    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW__API_AUTH__JWT_SECRET}
-    AIRFLOW__API__BASE_URL: "https://airflow.${DOCKER_DOMAIN}"
-    AIRFLOW__API__WORKERS: 1
-    AIRFLOW__CORE__AUTH_MANAGER: airflow.providers.fab.auth_manager.fab_auth_manager.FabAuthManager
-    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: 'http://airflow-apiserver:8080/execution/'
-    AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
-    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:${POSTGRES_PASSWORD}@postgres/airflow
-    AIRFLOW__CELERY__SYNC_PARALLELISM: 2
-    AIRFLOW__CELERY__WORKER_AUTOSCALE: '2,1'
-    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
-    AIRFLOW__CORE__EXECUTOR: CeleryExecutor
-    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW__CORE__FERNET_KEY}
-    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
-    AIRFLOW__CORE__PARALLELISM: 2
-    AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG: 2
-    AIRFLOW__DAG_PROCESSOR__REFRESH_INTERVAL: 60
-    AIRFLOW__SCHEDULER__MIN_FILE_PROCESS_INTERVAL: 60
-    AIRFLOW__SCHEDULER__PARSING_PROCESSES: 1
-    AIRFLOW__WEBSERVER__WORKERS: 1
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg://airflow:${POSTGRES_PASSWORD}@postgres/airflow
-    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN_ASYNC: postgresql+psycopg://airflow:${POSTGRES_PASSWORD}@postgres/airflow
-    AIRFLOW__SCHEDULER__CATCHUP_BY_DEFAULT: 'false'
-    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: 'true'
-    AIRFLOW__SECRETS__BACKEND: airflow_utilities.vault_backend.CertVaultBackend
-    AIRFLOW__SECRETS__BACKEND_KWARGS: |
-      {
-        "auth_mount_point": "cert",
-        "cert": [
-          "/run/secrets/fullchain",
-          "/run/secrets/key"
-        ],
-        "connections_path": "airflow/connections",
-        "mount_point": "kv",
-        "url": "${VAULT_ADDR}",
-        "variables_path": "airflow/variables",
-        "verify": "${VAULT_CACERT}"
-      }
-    AIRFLOW__FAB__CONFIG_FILE: '/opt/airflow/config/webserver_config.py'
-    AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
-    AUTH_LDAP_SERVER: ${AUTH_LDAP_SERVER}
-    AUTH_LDAP_TLS_CACERTFILE: ${AUTH_LDAP_TLS_CACERTFILE}
+    - /tmp:rw,noexec,nosuid,size=32m,mode=770,uid=${AUTOMATION_UID:-50000},gid=0
+  environment: &runner-env
     SSL_CERT_FILE: ${VAULT_CACERT}
-    UV_CACHE_DIR: /opt/airflow/venv/cache/uv
     VAULT_ADDR: ${VAULT_ADDR}
     VAULT_CACERT: ${VAULT_CACERT}
-    # The following line can be used to set a custom config file, stored in the local config folder
-    # If you want to use it, outcomment it and replace airflow.cfg with the name of your config file
-    # AIRFLOW_CONFIG: '/opt/airflow/config/airflow.cfg'
+    PHOENIX_COLLECTOR_ENDPOINT: ${PHOENIX_COLLECTOR_ENDPOINT:-https://phoenix-otlp.${DOCKER_DOMAIN}/v1/traces}
+    PHOENIX_PROJECT_NAME: ${PHOENIX_PROJECT_NAME:-cyber_analyst}
+    OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE: /etc/ssl/certs/ca-certificates.crt
+    OTEL_EXPORTER_OTLP_TRACES_CLIENT_CERTIFICATE: /run/secrets/fullchain
+    OTEL_EXPORTER_OTLP_TRACES_CLIENT_KEY: /run/secrets/key
   volumes:
-    - ${AIRFLOW_PROJ_DIR:-.}/dags:/opt/airflow/dags
-    - airflow-logs-volume:/opt/airflow/logs
-    - airflow-venv-volume:/opt/airflow/venv
-    - ${AIRFLOW_PROJ_DIR:-.}/config:/opt/airflow/config
-    - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt
+    - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
     - /scratch/archive:/scratch/archive
-  secrets:
-    - fullchain
-    - key
-  user: "${AIRFLOW_UID:-50000}:0"
-  depends_on:
-    &airflow-common-depends-on
-    redis:
-      condition: service_healthy
-    postgres:
-      condition: service_healthy
+  secrets: [fullchain, key]
+  user: "${AUTOMATION_UID:-50000}:0"
+  networks: [default]
 
 services:
   postgres-outputs:
@@ -141,302 +36,65 @@ services:
       POSTGRES_MULTIPLE_DATABASES: airflow,djangodev
     volumes:
       - postgres-outputs-volume:/var/lib/postgresql/
-      - ${AIRFLOW_PROJ_DIR:-.}/config/create-multiple-postgresql-databases.sh:/docker-entrypoint-initdb.d/create-multiple-postgresql-databases.sh
+      - ./config/create-multiple-postgresql-databases.sh:/docker-entrypoint-initdb.d/create-multiple-postgresql-databases.sh:ro
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "airflow"]
-    ports:
-      - 5432:5432
+      test: [CMD, pg_isready, -U, airflow]
+    ports: ["5432:5432"]
     labels:
-      - "traefik.enable=true"
-      - "traefik.tcp.routers.postgres-outputs.rule=HostSNI(`postgres.${DOMAIN}`)"
-      - "traefik.tcp.routers.postgres-outputs.tls=true"
-      - "traefik.tcp.routers.postgres-outputs.entrypoints=postgres"
-      - "traefik.tcp.routers.postgres-outputs.service=postgres-outputs"
-      - "traefik.tcp.services.postgres-outputs.loadbalancer.server.port=5432"
-    networks:
-      - default
-      - traefik_proxy
+      - traefik.enable=true
+      - traefik.tcp.routers.postgres-outputs.rule=HostSNI(`postgres.${DOMAIN}`)
+      - traefik.tcp.routers.postgres-outputs.tls=true
+      - traefik.tcp.routers.postgres-outputs.entrypoints=postgres
+      - traefik.tcp.routers.postgres-outputs.service=postgres-outputs
+      - traefik.tcp.services.postgres-outputs.loadbalancer.server.port=5432
+    networks: [default, traefik_proxy]
 
-  postgres:
-    extends:
-      file: ../compose-security-baseline/hardening.yml
-      service: postgres
-    image: postgres:18
-    cpu_shares: 512
+  exam:
+    <<: *runner
+    image: ghcr.io/enucatl/docker-airflow-exam:main
+    build:
+      context: .
+      dockerfile: images/exam/Dockerfile
     environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: airflow
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "airflow"]
-    volumes:
-      - postgres-db-volume:/var/lib/postgresql/
-    networks:
-      - default
+      <<: *runner-env
+      AUTOMATION_PIPELINE: exam
+    command: [main]
 
-  redis:
-    extends:
-      file: ../compose-security-baseline/hardening.yml
-      service: redis
-    # Redis is limited to 7.2-bookworm due to licencing change
-    # https://redis.io/blog/redis-adopts-dual-source-available-licensing/
-    image: redis:8
-    cpu_shares: 512
-    expose:
-      - 6379
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 30s
-      retries: 50
-      start_period: 30s
-    volumes:
-      - redis-data:/data
-    networks:
-      - default
-
-  airflow-apiserver:
-    <<: *airflow-common
-    command: api-server
-    cpu_shares: 512
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/api/v2/version"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
+  download-zanzara:
+    <<: *runner
+    image: ghcr.io/enucatl/docker-airflow-download-zanzara:main
+    build:
+      context: .
+      dockerfile: images/download-zanzara/Dockerfile
     environment:
-      <<: *airflow-common-env
-    depends_on:
-      <<: *airflow-common-depends-on
-      airflow-init:
-        condition: service_completed_successfully
-    labels:
-      - "checkmk_monitor=true"
-      - "traefik.enable=true"
-      - "traefik.docker.network=traefik_proxy"
-      - "traefik.http.routers.airflow.rule=Host(`airflow.${DOCKER_DOMAIN}`)"
-      - "traefik.http.routers.airflow.entrypoints=https"
-      - "traefik.http.routers.airflow.middlewares=secured@file"
-      - "traefik.http.routers.airflow.tls=true"
-      - "traefik.http.routers.airflow.service=airflow"
-      - "traefik.http.services.airflow.loadbalancer.server.port=8080"
-    networks:
-      - default
-      - traefik_proxy
+      <<: *runner-env
+      AUTOMATION_PIPELINE: download-zanzara
+    command: [main]
 
-  airflow-scheduler:
-    <<: *airflow-common
-    extends:
-      file: ../compose-security-baseline/hardening.yml
-      service: hardened-xlarge
-    command: scheduler
-    cpu_shares: 512
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8974/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    depends_on:
-      <<: *airflow-common-depends-on
-      airflow-init:
-        condition: service_completed_successfully
-
-  airflow-dag-processor:
-    <<: *airflow-common
-    extends:
-      file: ../compose-security-baseline/hardening.yml
-      service: hardened-xlarge
-    command: dag-processor
-    cpu_shares: 512
-    healthcheck:
-      test: ["CMD-SHELL", 'airflow jobs check --job-type DagProcessorJob --hostname "$${HOSTNAME}"']
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    depends_on:
-      <<: *airflow-common-depends-on
-      airflow-init:
-        condition: service_completed_successfully
-
-  airflow-worker:
-    <<: *airflow-common
-    extends:
-      file: ../compose-security-baseline/hardening.yml
-      service: hardened-xxlarge
-    command: celery worker
-    cpu_shares: 512
-    healthcheck:
-      # yamllint disable rule:line-length
-      test:
-        - "CMD-SHELL"
-        - 'celery --app airflow.providers.celery.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}" || celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"'
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
+  puppet-release-watch:
+    <<: *runner
+    image: ghcr.io/enucatl/docker-airflow-puppet-release-watch:main
+    build:
+      context: .
+      dockerfile: images/puppet-release-watch/Dockerfile
     environment:
-      <<: *airflow-common-env
-      PHOENIX_COLLECTOR_ENDPOINT: ${PHOENIX_COLLECTOR_ENDPOINT:-https://phoenix-otlp.${DOCKER_DOMAIN}/v1/traces}
-      PHOENIX_PROJECT_NAME: ${PHOENIX_PROJECT_NAME:-cyber_analyst}
-      OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE: /etc/ssl/certs/ca-certificates.crt
-      OTEL_EXPORTER_OTLP_TRACES_CLIENT_CERTIFICATE: /run/secrets/fullchain
-      OTEL_EXPORTER_OTLP_TRACES_CLIENT_KEY: /run/secrets/key
-      # Required to handle warm shutdown of the celery workers properly
-      # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
-      DUMB_INIT_SETSID: "0"
-    depends_on:
-      <<: *airflow-common-depends-on
-      airflow-init:
-        condition: service_completed_successfully
-      airflow-apiserver:
-        condition: service_healthy 
-    networks:
-      - default
+      <<: *runner-env
+      AUTOMATION_PIPELINE: puppet-release-watch
+    command: [main]
 
-  airflow-triggerer:
-    <<: *airflow-common
-    extends:
-      file: ../compose-security-baseline/hardening.yml
-      service: hardened-xlarge
-    command: triggerer
-    cpu_shares: 512
-    healthcheck:
-      test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    depends_on:
-      <<: *airflow-common-depends-on
-      airflow-init:
-        condition: service_completed_successfully
-
-  airflow-init:
-    <<: *airflow-common
-    entrypoint: /bin/bash
-    command:
-      - -c
-      - |
-        set -euo pipefail
-        if [[ -z "${AIRFLOW_UID:-}" ]]; then
-          echo
-          echo -e "\033[1;33mWARNING!!!: AIRFLOW_UID not set!\e[0m"
-          echo "If you are on Linux, you SHOULD follow the instructions below to set "
-          echo "AIRFLOW_UID environment variable, otherwise files may be owned by the container UID."
-          echo "For other operating systems you can get rid of the warning with manually created .env file:"
-          echo "    See: https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html#setting-the-right-airflow-user"
-          echo
-          export AIRFLOW_UID=$(id -u)
-        fi
-        one_meg=1048576
-        mem_available=$$(($$(getconf _PHYS_PAGES) * $$(getconf PAGE_SIZE) / one_meg))
-        cpus_available=$$(grep -cE 'cpu[0-9]+' /proc/stat)
-        disk_available=$$(df / | tail -1 | awk '{print $$4}')
-        warning_resources="false"
-        if (( mem_available < 4000 )) ; then
-          echo
-          echo -e "\033[1;33mWARNING!!!: Not enough memory available for Docker.\e[0m"
-          echo "At least 4GB of memory required. You have $$(numfmt --to iec $$((mem_available * one_meg)))"
-          echo
-          warning_resources="true"
-        fi
-        if (( cpus_available < 2 )); then
-          echo
-          echo -e "\033[1;33mWARNING!!!: Not enough CPUS available for Docker.\e[0m"
-          echo "At least 2 CPUs recommended. You have $${cpus_available}"
-          echo
-          warning_resources="true"
-        fi
-        if (( disk_available < one_meg * 10 )); then
-          echo
-          echo -e "\033[1;33mWARNING!!!: Not enough Disk space available for Docker.\e[0m"
-          echo "At least 10 GBs recommended. You have $$(numfmt --to iec $$((disk_available * 1024 )))"
-          echo
-          warning_resources="true"
-        fi
-        if [[ $${warning_resources} == "true" ]]; then
-          echo
-          echo -e "\033[1;33mWARNING!!!: You have not enough resources to run Airflow (see above)!\e[0m"
-          echo "Please follow the instructions to increase amount of resources available:"
-          echo "   https://airflow.apache.org/docs/apache-airflow/stable/howto/docker-compose/index.html#before-you-begin"
-          echo
-        fi
-        echo "Airflow version:"
-        /entrypoint airflow version
-        echo
-        echo "Files in shared volumes:"
-        echo
-        ls -la /opt/airflow/{logs,dags,config}
-        echo
-        echo "Checking whether database migrations are already applied."
-        echo
-        if /entrypoint airflow db check-migrations -t 0 >/dev/null 2>&1; then
-          echo "Database is already at the expected migration revision."
-        else
-          echo "Running database migrations."
-          /entrypoint airflow db migrate
-        fi
-        echo
-        echo "Files in shared volumes:"
-        echo
-        ls -la /opt/airflow/{logs,dags,config}
-    restart: no
-
-    # yamllint enable rule:line-length
+  cyber-analyst:
+    <<: *runner
+    image: ghcr.io/enucatl/docker-airflow-cyber-analyst:main
+    build:
+      context: .
+      dockerfile: images/cyber-analyst/Dockerfile
     environment:
-      <<: *airflow-common-env
-      _AIRFLOW_WWW_USER_CREATE: 'true'
-      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
-      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
-      _PIP_ADDITIONAL_REQUIREMENTS: ''
-
-  airflow-cli:
-    <<: *airflow-common
-    profiles:
-      - debug
-    environment:
-      <<: *airflow-common-env
-      CONNECTION_CHECK_MAX_COUNT: "0"
-    # Workaround for entrypoint issue. See: https://github.com/apache/airflow/issues/16252
-    command:
-      - bash
-      - -c
-      - airflow
-    depends_on:
-      <<: *airflow-common-depends-on
-    networks:
-      - default
-
-  # You can enable flower by adding "--profile flower" option e.g. docker-compose --profile flower up
-  # or by explicitly targeted on the command line e.g. docker-compose up flower.
-  # See: https://docs.docker.com/compose/profiles/
-  flower:
-    <<: *airflow-common
-    command: celery flower
-    profiles:
-      - flower
-    ports:
-      - "5555:5555"
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:5555/"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    depends_on:
-      <<: *airflow-common-depends-on
-      airflow-init:
-        condition: service_completed_successfully
+      <<: *runner-env
+      AUTOMATION_PIPELINE: cyber-analyst
+    command: [main]
 
 volumes:
-  postgres-db-volume:
   postgres-outputs-volume:
-  redis-data:
-  airflow-logs-volume:
-  airflow-venv-volume:
 
 networks:
   default:

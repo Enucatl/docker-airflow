@@ -1,0 +1,21 @@
+[project]
+name = "automation-cyber-analyst"
+version = "0.1.0"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+  "arize-phoenix-otel",
+  "automation-core",
+  "langchain-openai",
+  "langgraph",
+  "mac-vendor-lookup",
+  "openinference-instrumentation-langchain",
+  "psycopg[binary]",
+  "pydantic",
+  "requests",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+automation-core = { path = "../../packages/automation-core" }

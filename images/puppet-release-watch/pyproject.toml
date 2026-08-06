@@ -1,0 +1,11 @@
+[project]
+name = "automation-puppet-release-watch"
+version = "0.1.0"
+requires-python = ">=3.14,<3.15"
+dependencies = ["automation-core", "requests"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+automation-core = { path = "../../packages/automation-core" }

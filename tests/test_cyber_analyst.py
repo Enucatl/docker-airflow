@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import ast
 from datetime import UTC, datetime
-import importlib
-from pathlib import Path
 
 from common.suricata_monthly_triage import (
     build_signature_summary_for_llm,
@@ -17,70 +14,11 @@ from common.suricata_monthly_triage import (
     render_plaintext_report,
     run_signature_agent,
 )
-from dags.cyber_analyst import (
+from automation.pipelines.cyber_analyst import (
     _collection_limit,
     _rate_limit_warning,
 )
-
-
-def test_analyze_signatures_imports_loki_client_inside_virtualenv_task() -> None:
-    source = Path("/opt/docker/airflow/dags/cyber_analyst.py").read_text()
-    module = ast.parse(source)
-
-    analyze_signatures = next(
-        node
-        for node in ast.walk(module)
-        if isinstance(node, ast.FunctionDef) and node.name == "analyze_signatures"
-    )
-    assert any(
-        isinstance(node, ast.FunctionDef) and node.name == "query_suricata_context"
-        for node in ast.walk(analyze_signatures)
-    )
-
-    assert any(
-        isinstance(stmt, ast.Assign)
-        and any(
-            isinstance(target, ast.Name) and target.id == "LOKI_CONN_ID"
-            for target in stmt.targets
-        )
-        for stmt in analyze_signatures.body
-    )
-    assert any(
-        isinstance(stmt, ast.FunctionDef) and stmt.name == "rate_limit_warning"
-        for stmt in analyze_signatures.body
-    )
-    assert any(
-        isinstance(stmt, ast.ImportFrom)
-        and stmt.module == "common.loki"
-        and {alias.name for alias in stmt.names}
-        >= {"query_loki_range", "query_loki_range_adaptive"}
-        for stmt in analyze_signatures.body
-    )
-    assert any(
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "query_loki_range_adaptive"
-        for node in ast.walk(analyze_signatures)
-    )
-    assert "alert_signature_id" in source
-    assert "alert.signature_id" not in source
-
-
-def test_collect_signatures_uses_previous_success_for_continuity() -> None:
-    source = Path("/opt/docker/airflow/dags/cyber_analyst.py").read_text()
-    module = ast.parse(source)
-
-    collect_signatures = next(
-        node
-        for node in ast.walk(module)
-        if isinstance(node, ast.FunctionDef) and node.name == "collect_signatures"
-    )
-    arg_names = [arg.arg for arg in collect_signatures.args.args]
-
-    assert "logical_date" in arg_names
-    assert "prev_data_interval_end_success" in arg_names
-    assert "window_start = parse_datetime(prev_data_interval_end_success)" in source
-    assert "window_end = parse_datetime(logical_date)" in source
+from automation.pipelines import cyber_analyst
 
 
 def test_previous_calendar_month_window() -> None:
@@ -425,18 +363,66 @@ def test_collection_limit_supports_test_mode() -> None:
     assert _collection_limit(False) == 5000
 
 
-def test_dag_import_and_virtualenv_requirements() -> None:
-    module = importlib.import_module("dags.cyber_analyst")
+def test_watermark_advances_only_after_report_delivery(monkeypatch) -> None:
+    updates: list[tuple[object, ...] | None] = []
 
-    assert module.dag.dag_id == "cyber_analyst"
-    assert "test_mode" in module.dag.params
-    assert module.VIRTUALENV_REQUIREMENTS == [
-        "apache-airflow",
-        "arize-phoenix-otel",
-        "langgraph",
-        "langchain-openai",
-        "mac-vendor-lookup",
-        "pydantic",
-        "openinference-instrumentation-langchain",
-        "requests",
-    ]
+    class Cursor:
+        def __init__(self, read: bool) -> None:
+            self.read = read
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args) -> None:
+            return None
+
+        def execute(self, sql, parameters=None) -> None:
+            if sql.startswith("UPDATE automation_run_state"):
+                updates.append(parameters)
+
+        def fetchone(self):
+            return (datetime(2026, 7, 1, tzinfo=UTC),)
+
+    class Database:
+        def __init__(self, read: bool) -> None:
+            self.read = read
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args) -> None:
+            return None
+
+        def cursor(self):
+            return Cursor(self.read)
+
+        def commit(self) -> None:
+            return None
+
+    databases = iter([Database(True), Database(False)])
+    monkeypatch.setattr(
+        cyber_analyst, "postgres_connect", lambda _connection: next(databases)
+    )
+    monkeypatch.setattr(cyber_analyst, "collect_signatures", lambda *args, **kwargs: {})
+    monkeypatch.setattr(cyber_analyst, "analyze_signatures", lambda *args, **kwargs: {})
+    monkeypatch.setattr(
+        cyber_analyst,
+        "render_email_report",
+        lambda *args, **kwargs: {"subject": "report", "body": "body"},
+    )
+    monkeypatch.setattr(
+        cyber_analyst,
+        "send_email",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("SMTP failed")),
+    )
+
+    class Vault:
+        def get(self, _name):
+            return object()
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="SMTP failed"):
+        cyber_analyst.run(Vault())
+
+    assert updates == []

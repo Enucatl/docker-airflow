@@ -8,21 +8,24 @@ on:
       - ".github/workflows/build.yaml"
       - "pyproject.toml"
       - "uv.lock"
-      - "build/**"
-      - "scripts/**"
+      - "automation/**"
+      - "dags/common/**"
+      - "images/**"
+      - "packages/**"
   pull_request:
     paths:
       - ".github/workflows/build.yaml"
       - "pyproject.toml"
       - "uv.lock"
-      - "build/**"
-      - "scripts/**"
+      - "automation/**"
+      - "dags/common/**"
+      - "images/**"
+      - "packages/**"
 
 jobs:
   prepare:
     runs-on: ubuntu-latest
     outputs:
-      airflow_version: ${{ steps.version.outputs.airflow_version }}
       version: ${{ steps.version.outputs.version }}
       meta_tags: ${{ steps.version.outputs.meta_tags }}
     steps:
@@ -37,12 +40,10 @@ jobs:
         run: |
           set -euo pipefail
 
-          airflow_version="$(python3 scripts/airflow-version)"
           short_sha="$(git rev-parse --short HEAD)"
-          version="${airflow_version}-${short_sha}"
+          version="${short_sha}"
 
           {
-            echo "airflow_version=${airflow_version}"
             echo "version=${version}"
             echo "meta_tags<<EOF"
             echo "type=raw,value=${version}"
@@ -52,6 +53,13 @@ jobs:
 
   docker:
     needs: prepare
+    strategy:
+      matrix:
+        pipeline:
+          - exam
+          - download-zanzara
+          - puppet-release-watch
+          - cyber-analyst
     permissions:
       contents: read
       packages: write
@@ -59,14 +67,12 @@ jobs:
       security-events: write
     uses: Enucatl/docker-compose-security-baseline/.github/workflows/docker-ci.yml@main
     with:
-      image_name: ghcr.io/enucatl/docker-airflow
+      image_name: ghcr.io/enucatl/docker-airflow-${{ matrix.pipeline }}
       version: ${{ needs.prepare.outputs.version }}
       meta_tags: ${{ needs.prepare.outputs.meta_tags }}
       context: .
-      dockerfile: build/Dockerfile
+      dockerfile: images/${{ matrix.pipeline }}/Dockerfile
       platforms: linux/amd64
       push: ${{ github.event_name != 'pull_request' }}
       fail_on_image_findings: false
-      build_args: |
-        AIRFLOW_VERSION=${{ needs.prepare.outputs.airflow_version }}
     secrets: inherit

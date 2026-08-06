@@ -5,9 +5,23 @@ import logging
 from typing import Any
 
 import requests
-from airflow.sdk.bases.hook import BaseHook
+
+from automation_core.connections import Connection, VaultConnections
 
 from common.ssl import verify
+
+_vault: VaultConnections | None = None
+
+
+def set_vault(vault: VaultConnections) -> None:
+    global _vault
+    _vault = vault
+
+
+def _connection(connection_id: str) -> Connection:
+    if _vault is None:
+        raise RuntimeError("Loki Vault client is not configured")
+    return _vault.get(connection_id)
 
 
 def query_loki_range(
@@ -18,10 +32,10 @@ def query_loki_range(
     end: datetime,
     limit: int = 1000,
 ) -> dict[str, Any]:
-    conn = BaseHook.get_connection(conn_id)
+    conn = _connection(conn_id)
     endpoint = f"{conn.host.rstrip('/')}/loki/api/v1/query_range"
     headers: dict[str, str] = {}
-    extras = conn.extra_dejson
+    extras = conn.extra
     if tenant_id := extras.get("tenant_id"):
         headers["X-Scope-OrgID"] = tenant_id
     auth = (conn.login, conn.password) if conn.login and conn.password else None

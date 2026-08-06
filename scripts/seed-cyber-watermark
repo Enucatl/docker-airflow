@@ -1,0 +1,21 @@
+#!/bin/sh
+set -eu
+
+if [ "$#" -ne 1 ]; then
+    echo "usage: $0 <final-successful-airflow-logical-date>" >&2
+    exit 2
+fi
+
+boundary=$1
+docker compose exec -T postgres-outputs psql -U airflow -d airflow \
+    --set=ON_ERROR_STOP=1 \
+    --set=boundary="$boundary" <<'SQL'
+CREATE TABLE IF NOT EXISTS automation_run_state (
+    pipeline TEXT PRIMARY KEY,
+    last_successful_boundary TIMESTAMPTZ NOT NULL
+);
+INSERT INTO automation_run_state (pipeline, last_successful_boundary)
+VALUES ('cyber_analyst', :'boundary'::timestamptz)
+ON CONFLICT (pipeline) DO UPDATE
+SET last_successful_boundary = EXCLUDED.last_successful_boundary;
+SQL
