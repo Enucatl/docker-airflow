@@ -17,3 +17,4 @@ def test_timers_are_utc_and_do_not_catch_up() -> None:
     assert "OnCalendar=*-*-* *:00:00 UTC" in yaml
     assert "OnCalendar=*-*-01 03:00:00 UTC" in yaml
     assert yaml.count("docker compose run --build --rm --no-deps") >= 4
+    assert yaml.count("EnvironmentFile=/opt/docker/.env") >= 4
