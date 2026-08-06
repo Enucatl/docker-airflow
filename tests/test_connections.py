@@ -17,6 +17,23 @@ def test_parse_legacy_vault_connection() -> None:
     assert connection.extra == {"dbname": "output"}
 
 
+def test_parse_legacy_vault_connection_uri() -> None:
+    connection = parse_connection(
+        {
+            "uri": (
+                "postgresql://user%40example:secret%2Fvalue@postgres-outputs:5432/"
+                "djangodev?sslmode=prefer"
+            )
+        }
+    )
+
+    assert connection.host == "postgres-outputs"
+    assert connection.port == 5432
+    assert connection.login == "user@example"
+    assert connection.password == "secret/value"
+    assert connection.extra == {"sslmode": "prefer", "dbname": "djangodev"}
+
+
 def test_vault_uses_certificate_session(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

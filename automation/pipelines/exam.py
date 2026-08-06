@@ -100,7 +100,7 @@ def scrape(vault: VaultConnections) -> list[dict[str, str]]:
             ]:
                 dropdown.select_option(label=location)
                 page.locator("dw-week-list div#jour").first.wait_for(
-                    state="visible", timeout=30000
+                    state="visible", timeout=15000
                 )
                 while True:
                     appointments.extend(
@@ -111,7 +111,7 @@ def scrape(vault: VaultConnections) -> list[dict[str, str]]:
                         break
                     button.click()
                     page.locator("dw-week-list div#jour").first.wait_for(
-                        state="visible", timeout=30000
+                        state="visible", timeout=15000
                     )
             return appointments
         finally:

@@ -51,6 +51,8 @@ services:
 
   exam:
     <<: *runner
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=256m,mode=770,uid=${AUTOMATION_UID:-50000},gid=0
     image: ghcr.io/enucatl/docker-airflow-exam:main
     build:
       context: .

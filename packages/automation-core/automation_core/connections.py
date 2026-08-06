@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import json
 import os
 from typing import Any
+from urllib.parse import parse_qs, unquote, urlsplit
 
 import hvac
 from requests import Session
@@ -21,6 +22,28 @@ class Connection:
 
 
 def parse_connection(payload: dict[str, Any]) -> Connection:
+    if uri := payload.get("uri"):
+        parsed = urlsplit(str(uri))
+        query = {
+            key: values[-1] if len(values) == 1 else values
+            for key, values in parse_qs(parsed.query, keep_blank_values=True).items()
+        }
+        encoded_extra = query.pop("__extra__", None)
+        if encoded_extra:
+            decoded_extra = json.loads(str(encoded_extra))
+            if not isinstance(decoded_extra, dict):
+                raise ValueError("connection __extra__ must be a JSON object")
+            query.update(decoded_extra)
+        if parsed.path and parsed.path != "/":
+            query.setdefault("dbname", unquote(parsed.path.removeprefix("/")))
+        return Connection(
+            host=parsed.hostname or "",
+            port=parsed.port,
+            login=unquote(parsed.username or ""),
+            password=unquote(parsed.password or ""),
+            extra=query,
+        )
+
     raw_extra = payload.get("extra") or {}
     if isinstance(raw_extra, str):
         raw_extra = json.loads(raw_extra)
