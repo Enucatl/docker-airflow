@@ -75,4 +75,5 @@ jobs:
       platforms: linux/amd64
       push: ${{ github.event_name != 'pull_request' }}
       fail_on_image_findings: false
-    secrets: inherit
+    secrets:
+      registry_token: ${{ secrets.GITHUB_TOKEN }}
