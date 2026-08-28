@@ -95,8 +95,25 @@ services:
       AUTOMATION_PIPELINE: cyber-analyst
     command: [main]
 
+  operations-analyst:
+    <<: *runner
+    image: ghcr.io/enucatl/docker-airflow-operations-analyst:main
+    build:
+      context: .
+      dockerfile: images/operations-analyst/Dockerfile
+    environment:
+      <<: *runner-env
+      AUTOMATION_PIPELINE: operations-analyst
+      OPERATIONS_REPOSITORY_ROOT: /repository-corpus
+      PHOENIX_PROJECT_NAME: operations_analyst
+    volumes:
+      - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
+      - operations-repository-corpus:/repository-corpus
+    command: [main]
+
 volumes:
   postgres-outputs-volume:
+  operations-repository-corpus:
 
 networks:
   default:

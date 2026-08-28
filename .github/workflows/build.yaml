@@ -60,6 +60,7 @@ jobs:
           - download-zanzara
           - puppet-release-watch
           - cyber-analyst
+          - operations-analyst
     permissions:
       contents: read
       packages: write

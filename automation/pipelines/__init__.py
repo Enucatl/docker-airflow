@@ -10,6 +10,8 @@ def run_pipeline(name: str, vault: VaultConnections) -> None:
         from automation.pipelines.puppet_release_watch import run
     elif name == "cyber-analyst":
         from automation.pipelines.cyber_analyst import run
+    elif name == "operations-analyst":
+        from automation.pipelines.operations_analyst import run
     else:
         raise ValueError(f"Unknown pipeline: {name}")
     run(vault)

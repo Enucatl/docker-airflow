@@ -23,9 +23,17 @@ cyber-analyst = [
   "psycopg[binary]",
   "pydantic",
 ]
+operations-analyst = [
+  { include-group = "common" },
+  "arize-phoenix-otel",
+  "langchain-openai",
+  "psycopg[binary]",
+  "pydantic",
+]
 dev = [
   { include-group = "exam" },
   { include-group = "cyber-analyst" },
+  { include-group = "operations-analyst" },
   "pytest",
   "ruff",
 ]

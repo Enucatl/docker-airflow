@@ -18,8 +18,9 @@ def test_timers_are_utc_and_do_not_catch_up() -> None:
     assert yaml.count("Persistent=false") >= 4
     assert "OnCalendar=*-*-* *:00:00 UTC" in yaml
     assert "OnCalendar=*-*-01 03:00:00 UTC" in yaml
-    assert yaml.count("docker compose run --build --rm --no-deps") >= 4
-    assert yaml.count("EnvironmentFile=/opt/docker/.env") >= 4
+    assert "OnCalendar=Fri *-*-* 02:00:00 UTC" in yaml
+    assert yaml.count("docker compose run --build --rm --no-deps") >= 5
+    assert yaml.count("EnvironmentFile=/opt/docker/.env") >= 5
 
 
 def test_exam_has_sufficient_chromium_temporary_space() -> None:

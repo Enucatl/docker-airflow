@@ -1,6 +1,6 @@
 # Scheduled automation runners
 
-The four production automations run as short-lived Python 3.14 containers. Each
+The five production automations run as short-lived Python 3.14 containers. Each
 pipeline directory under `images/` has its own Dockerfile, `pyproject.toml`,
 lockfile, image, and dependency environment:
 
@@ -12,6 +12,15 @@ locks the resolved version of the local package and its transitive dependencies.
 - `download-zanzara`: requests and ffmpeg
 - `puppet-release-watch`: requests
 - `cyber-analyst`: PostgreSQL, LangGraph/LangChain, and OpenTelemetry
+- `operations-analyst`: weekly Loki reliability analysis with repository and web evidence
+
+The operations analyst runs Friday at 02:00 UTC. It synchronizes the public
+repositories listed in `config/operations-repositories.json` into its persistent
+corpus volume, analyzes operational errors (excluding specialized network/security
+telemetry), and emails diagnoses. Each actionable diagnosis contains a standalone
+Codex prompt for applying a minimal, tested fix from `/opt/docker` without committing.
+Its LLM endpoint is configured independently through the Vault connection
+`operations_analyst_openrouter`.
 
 Only `postgres-outputs` is long-lived. The runner services are behind the
 `runner` Compose profile and do not start with a normal `docker compose up -d`.

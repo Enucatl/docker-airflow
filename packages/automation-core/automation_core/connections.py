@@ -102,6 +102,7 @@ class VaultConnections:
             "smtp_default",
             "loki",
             "openai_compatible",
+            "operations_analyst_openrouter",
             "greynoise",
             "abuseipdb",
             "tavily",

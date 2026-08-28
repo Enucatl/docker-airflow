@@ -184,6 +184,14 @@ exam = [
     { name = "psycopg", extra = ["binary"] },
     { name = "requests" },
 ]
+operations-analyst = [
+    { name = "arize-phoenix-otel" },
+    { name = "hvac" },
+    { name = "langchain-openai" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "pydantic" },
+    { name = "requests" },
+]
 puppet-release-watch = [
     { name = "hvac" },
     { name = "requests" },
@@ -229,6 +237,14 @@ exam = [
     { name = "hvac" },
     { name = "playwright" },
     { name = "psycopg", extras = ["binary"] },
+    { name = "requests" },
+]
+operations-analyst = [
+    { name = "arize-phoenix-otel" },
+    { name = "hvac" },
+    { name = "langchain-openai" },
+    { name = "psycopg", extras = ["binary"] },
+    { name = "pydantic" },
     { name = "requests" },
 ]
 puppet-release-watch = [
