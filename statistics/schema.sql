@@ -83,3 +83,54 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA podcast_stats
     GRANT SELECT, INSERT, UPDATE ON TABLES TO podcast_stats_importer;
 ALTER DEFAULT PRIVILEGES IN SCHEMA podcast_stats
     GRANT USAGE, SELECT ON SEQUENCES TO podcast_stats_importer;
+
+CREATE OR REPLACE VIEW podcast_stats.daily_summary AS
+SELECT date_trunc('day', observed_at AT TIME ZONE 'UTC') AS day,
+       request_kind,
+       count(*) AS requests,
+       count(*) FILTER (WHERE request_kind = 'media') AS downloads,
+       count(DISTINCT listener_hash) AS listeners,
+       coalesce(sum(bytes_sent), 0) AS bytes_sent,
+       coalesce(sum(request_duration_ms), 0) AS request_duration_ms
+FROM podcast_stats.downloads
+GROUP BY 1, 2;
+
+CREATE OR REPLACE VIEW podcast_stats.episode_summary AS
+SELECT episode_id,
+       count(*) AS requests,
+       count(DISTINCT listener_hash) AS listeners,
+       coalesce(sum(bytes_sent), 0) AS bytes_sent,
+       count(*) FILTER (WHERE status_code IN (200, 206)) AS successful_requests,
+       max(observed_at) AS last_requested_at
+FROM podcast_stats.downloads
+WHERE request_kind = 'media'
+GROUP BY episode_id;
+
+CREATE OR REPLACE VIEW podcast_stats.geography_summary AS
+SELECT country_code,
+       country_name,
+       continent,
+       subdivision,
+       city,
+       count(*) AS requests,
+       count(DISTINCT listener_hash) AS listeners,
+       coalesce(sum(bytes_sent), 0) AS bytes_sent
+FROM podcast_stats.downloads
+GROUP BY country_code, country_name, continent, subdivision, city;
+
+CREATE OR REPLACE VIEW podcast_stats.client_summary AS
+SELECT request_kind,
+       app_player,
+       browser,
+       operating_system,
+       device_category,
+       count(*) AS requests,
+       count(DISTINCT listener_hash) AS listeners,
+       coalesce(sum(bytes_sent), 0) AS bytes_sent
+FROM podcast_stats.downloads
+GROUP BY request_kind, app_player, browser, operating_system, device_category;
+
+GRANT SELECT ON podcast_stats.daily_summary,
+    podcast_stats.episode_summary,
+    podcast_stats.geography_summary,
+    podcast_stats.client_summary TO podcast_stats_importer;
