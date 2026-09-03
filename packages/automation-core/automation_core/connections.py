@@ -97,6 +97,7 @@ class VaultConnections:
     def preflight(self) -> None:
         for connection_id in (
             "data",
+            "djangodev",
             "stva",
             "telegram_default",
             "smtp_default",
