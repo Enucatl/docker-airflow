@@ -130,7 +130,23 @@ SELECT request_kind,
 FROM podcast_stats.downloads
 GROUP BY request_kind, app_player, browser, operating_system, device_category;
 
+CREATE OR REPLACE VIEW podcast_stats.episode_completion_estimate AS
+SELECT episode_id,
+       count(*) AS media_requests,
+       count(*) FILTER (WHERE status_code = 200) AS full_response_requests,
+       count(*) FILTER (
+           WHERE status_code = 200
+              OR (range_end IS NOT NULL AND content_length IS NOT NULL
+                  AND range_end >= content_length - 1)
+       ) AS estimated_complete_requests,
+       'HTTP response/range heuristic; not proof of playback'::text
+           AS estimate_basis
+FROM podcast_stats.downloads
+WHERE request_kind = 'media'
+GROUP BY episode_id;
+
 GRANT SELECT ON podcast_stats.daily_summary,
     podcast_stats.episode_summary,
     podcast_stats.geography_summary,
-    podcast_stats.client_summary TO podcast_stats_importer;
+    podcast_stats.client_summary,
+    podcast_stats.episode_completion_estimate TO podcast_stats_importer;
