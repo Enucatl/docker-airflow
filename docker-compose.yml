@@ -111,6 +111,17 @@ services:
       - operations-repository-corpus:/repository-corpus
     command: [main]
 
+  podcast-statistics:
+    <<: *runner
+    image: ghcr.io/enucatl/docker-airflow-podcast-statistics:main
+    build:
+      context: .
+      dockerfile: images/podcast-statistics/Dockerfile
+    environment:
+      <<: *runner-env
+      AUTOMATION_PIPELINE: podcast-statistics
+    command: [main]
+
 volumes:
   postgres-outputs-volume:
   operations-repository-corpus:

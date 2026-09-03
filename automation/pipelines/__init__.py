@@ -12,6 +12,8 @@ def run_pipeline(name: str, vault: VaultConnections) -> None:
         from automation.pipelines.cyber_analyst import run
     elif name == "operations-analyst":
         from automation.pipelines.operations_analyst import run
+    elif name == "podcast-statistics":
+        from automation.pipelines.podcast_statistics import run
     else:
         raise ValueError(f"Unknown pipeline: {name}")
     run(vault)
