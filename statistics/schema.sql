@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS podcast_stats.downloads (
     browser               text,
     operating_system      text,
     device_category       text,
-    listener_hmac         text,
+    listener_hash         text,
     country_code          text,
     country_name          text,
     city                  text,
@@ -42,7 +42,7 @@ CREATE INDEX IF NOT EXISTS downloads_episode_time_idx
     ON podcast_stats.downloads (episode_id, observed_at);
 
 CREATE INDEX IF NOT EXISTS downloads_listener_time_idx
-    ON podcast_stats.downloads (listener_hmac, observed_at);
+    ON podcast_stats.downloads (listener_hash, observed_at);
 
 CREATE INDEX IF NOT EXISTS downloads_country_time_idx
     ON podcast_stats.downloads (country_code, observed_at);
