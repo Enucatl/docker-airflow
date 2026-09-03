@@ -2,7 +2,7 @@ from typing import Any
 
 from podcast_statistics.client import classify_user_agent, listener_hash
 from podcast_statistics.enrichment import geo_fields
-from podcast_statistics.parsing import parse_media_request
+from podcast_statistics.parsing import parse_media_request, parse_request
 
 
 def event(**overrides: Any) -> dict[str, Any]:
@@ -37,7 +37,30 @@ def test_parse_media_request_extracts_media_fields() -> None:
 
 def test_parse_media_request_ignores_head_and_non_media() -> None:
     assert parse_media_request(event(status=404)) is None
-    assert parse_media_request(event(request={"method": "HEAD"})) is None
+    head = event()
+    head["request"]["method"] = "HEAD"
+    assert parse_media_request(head) is not None
+
+
+def test_parse_request_retains_page_and_rss_requests() -> None:
+    page = event(
+        request={
+            "method": "GET",
+            "uri": "/token-token-token-1234/index.html",
+            "headers": {},
+        },
+        status=200,
+    )
+    rss = event(
+        request={
+            "method": "HEAD",
+            "uri": "/token-token-token-1234/feed.xml",
+            "headers": {},
+        },
+        status=200,
+    )
+    assert parse_request(page).request_kind == "page"
+    assert parse_request(rss).request_kind == "rss"
 
 
 def test_client_fields_and_sha256_are_stable() -> None:

@@ -9,13 +9,20 @@ from urllib.parse import urlsplit
 _MEDIA_PATH = re.compile(
     r"^/[A-Za-z0-9_-]{16,128}/media/(?P<episode>.+)-[0-9a-f]{16}\.mp3$"
 )
+_TOKEN = r"[A-Za-z0-9_-]{16,128}"
+_RSS_PATH = re.compile(rf"^/{_TOKEN}/feed\.xml$")
+_PAGE_PATH = re.compile(
+    rf"^/{_TOKEN}(?:/|/index\.html|/episodes/[A-Za-z0-9_-]+/index\.html|"
+    r"/episodes/[A-Za-z0-9_-]+/research/[A-Za-z0-9_-]+\.html)$"
+)
 _RANGE = re.compile(r"^bytes=(?P<start>\d+)-(?P<end>\d*)$")
 
 
 @dataclass(frozen=True)
 class MediaRequest:
     observed_at: str
-    episode_id: str
+    request_kind: str
+    episode_id: str | None
     method: str
     status_code: int
     request_path: str
@@ -51,18 +58,32 @@ def _integer(value: Any, field: str, *, default: int = 0) -> int:
     return parsed
 
 
-def parse_media_request(event: dict[str, Any]) -> MediaRequest | None:
+def parse_request(event: dict[str, Any]) -> MediaRequest | None:
     request = event.get("request")
     if not isinstance(request, dict):
         raise ValueError("Caddy event has no request object")
     method = str(request.get("method") or "")
-    if method == "HEAD":
+    if method not in ("GET", "HEAD"):
         return None
-    if method != "GET" or int(event.get("status", 0)) not in (200, 206):
-        return None
+    status = int(event.get("status", 0))
     path = urlsplit(str(request.get("uri") or "")).path
-    match = _MEDIA_PATH.fullmatch(path)
-    if match is None:
+    media_match = _MEDIA_PATH.fullmatch(path)
+    if media_match:
+        request_kind = "media"
+        episode_id = media_match.group("episode")
+        if status not in (200, 206):
+            return None
+    elif _RSS_PATH.fullmatch(path):
+        request_kind = "rss"
+        episode_id = None
+        if status not in (200, 304):
+            return None
+    elif _PAGE_PATH.fullmatch(path):
+        request_kind = "page"
+        episode_id = None
+        if status not in (200, 304):
+            return None
+    else:
         return None
 
     request_headers = request.get("headers") or {}
@@ -90,7 +111,8 @@ def parse_media_request(event: dict[str, Any]) -> MediaRequest | None:
     duration = event.get("duration")
     return MediaRequest(
         observed_at=str(event.get("ts") or ""),
-        episode_id=match.group("episode"),
+        request_kind=request_kind,
+        episode_id=episode_id,
         method=method,
         status_code=int(event["status"]),
         request_path=path,
@@ -106,3 +128,8 @@ def parse_media_request(event: dict[str, Any]) -> MediaRequest | None:
         trusted_client_ip=_header(request_headers, "Cf-Connecting-Ip"),
         cloudflare=cloudflare,
     )
+
+
+def parse_media_request(event: dict[str, Any]) -> MediaRequest | None:
+    parsed = parse_request(event)
+    return parsed if parsed and parsed.request_kind == "media" else None

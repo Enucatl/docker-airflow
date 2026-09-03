@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS podcast_stats.downloads (
     id                    bigserial PRIMARY KEY,
     source_log_id         text NOT NULL UNIQUE,
     observed_at           timestamptz NOT NULL,
-    episode_id            text NOT NULL,
+    request_kind          text NOT NULL DEFAULT 'media',
+    episode_id            text,
     method                text NOT NULL,
     status_code           integer NOT NULL,
     request_path          text NOT NULL,
@@ -32,6 +33,7 @@ CREATE TABLE IF NOT EXISTS podcast_stats.downloads (
     postal_code            text,
     latitude              double precision,
     longitude             double precision,
+    CHECK (request_kind IN ('media', 'page', 'rss')),
     CHECK (bytes_sent >= 0),
     CHECK (content_length IS NULL OR content_length >= 0),
     CHECK (range_start IS NULL OR range_start >= 0),
@@ -46,6 +48,9 @@ CREATE INDEX IF NOT EXISTS downloads_listener_time_idx
 
 CREATE INDEX IF NOT EXISTS downloads_country_time_idx
     ON podcast_stats.downloads (country_code, observed_at);
+
+CREATE INDEX IF NOT EXISTS downloads_kind_time_idx
+    ON podcast_stats.downloads (request_kind, observed_at);
 
 CREATE TABLE IF NOT EXISTS podcast_stats.importer_state (
     state_key       text PRIMARY KEY,
