@@ -5,6 +5,8 @@ import hashlib
 import json
 from typing import Any, Iterable, Mapping, Protocol
 
+from psycopg.types.json import Json
+
 
 class Database(Protocol):
     def transaction(self) -> Any: ...
@@ -55,7 +57,17 @@ def insert_records(
     *,
     watermark: datetime,
 ) -> None:
-    rows = list(records)
+    rows = [
+        {
+            **record,
+            "cloudflare": (
+                Json(record["cloudflare"])
+                if isinstance(record.get("cloudflare"), dict)
+                else record.get("cloudflare")
+            ),
+        }
+        for record in records
+    ]
     with database.transaction():
         with database.cursor() as cursor:
             if rows:
