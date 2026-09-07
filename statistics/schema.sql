@@ -108,15 +108,11 @@ GROUP BY episode_id;
 
 CREATE OR REPLACE VIEW podcast_stats.geography_summary AS
 SELECT country_code,
-       country_name,
-       continent,
-       subdivision,
-       city,
        count(*) AS requests,
        count(DISTINCT listener_hash) AS listeners,
        coalesce(sum(bytes_sent), 0) AS bytes_sent
 FROM podcast_stats.downloads
-GROUP BY country_code, country_name, continent, subdivision, city;
+GROUP BY country_code;
 
 CREATE OR REPLACE VIEW podcast_stats.client_summary AS
 SELECT request_kind,

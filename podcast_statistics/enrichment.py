@@ -22,31 +22,11 @@ def _text(metadata: Mapping[str, str], key: str) -> str | None:
     return value or None
 
 
-def _float(metadata: Mapping[str, str], key: str) -> float | None:
-    value = _text(metadata, key)
-    if value is None:
-        return None
-    try:
-        return float(value)
-    except ValueError:
-        return None
-
-
 def geo_fields(
     metadata: Mapping[str, str],
     *,
     header_country_code: str | None = None,
 ) -> GeoFields:
     return GeoFields(
-        country_code=_text(metadata, "country_code")
-        or _text(metadata, "geoip_country_code")
-        or (header_country_code or None),
-        country_name=_text(metadata, "geoip_country_name"),
-        city=_text(metadata, "geoip_city"),
-        continent=_text(metadata, "geoip_continent"),
-        subdivision=_text(metadata, "geoip_subdivision"),
-        timezone=_text(metadata, "geoip_timezone"),
-        postal_code=_text(metadata, "geoip_postal_code"),
-        latitude=_float(metadata, "geoip_latitude"),
-        longitude=_float(metadata, "geoip_longitude"),
+        country_code=_text(metadata, "country_code") or (header_country_code or None),
     )

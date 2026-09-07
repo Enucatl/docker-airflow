@@ -44,8 +44,7 @@ def _record(
     client = classify_user_agent(parsed.user_agent)
     geo = geo_fields(
         stream,
-        header_country_code=parsed.cloudflare.get("cf-ipcountry")
-        or parsed.cloudflare.get("cf-country"),
+        header_country_code=parsed.cloudflare.get("cf-ipcountry"),
     )
     return {
         "source_log_id": source_log_id(str(timestamp.timestamp()), stream, line),

@@ -7,13 +7,13 @@ from urllib.parse import urlsplit
 
 
 _MEDIA_PATH = re.compile(
-    r"^/[A-Za-z0-9_-]{16,128}/media/(?P<episode>.+)-[0-9a-f]{16}\.mp3$"
+    r"^/media/(?P<episode>.+)-[0-9a-f]{16}\.mp3$"
 )
-_TOKEN = r"[A-Za-z0-9_-]{16,128}"
-_RSS_PATH = re.compile(rf"^/{_TOKEN}/feed\.xml$")
+_RSS_PATH = re.compile(r"^/feed\.xml$")
 _PAGE_PATH = re.compile(
-    rf"^/{_TOKEN}(?:/|/index\.html|/episodes/[A-Za-z0-9_-]+/index\.html|"
-    r"/episodes/[A-Za-z0-9_-]+/research/[A-Za-z0-9_-]+\.html)$"
+    r"^/(?:index\.html)?$"
+    r"|^/episodes/[A-Za-z0-9_-]+/"
+    r"(?:index\.html|transcript\.html|research/[A-Za-z0-9_-]+\.html)?$"
 )
 _RANGE = re.compile(r"^bytes=(?P<start>\d+)-(?P<end>\d*)$")
 
@@ -105,7 +105,6 @@ def parse_request(event: dict[str, Any]) -> MediaRequest | None:
             ("cf-ray", _header(request_headers, "Cf-Ray")),
             ("cf-cache-status", _header(request_headers, "Cf-Cache-Status")),
             ("cf-ipcountry", _header(request_headers, "Cf-Ipcountry")),
-            ("cf-country", _header(request_headers, "Cf-Country")),
         )
         if value is not None
     }

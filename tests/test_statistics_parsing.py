@@ -13,7 +13,7 @@ def event(**overrides: Any) -> dict[str, Any]:
         "duration": 0.25,
         "request": {
             "method": "GET",
-            "uri": "/token-token-token-1234/media/episode-name-0123456789abcdef.mp3",
+            "uri": "/media/episode-name-0123456789abcdef.mp3",
             "headers": {
                 "Cf-Connecting-Ip": ["8.8.8.8"],
                 "User-Agent": ["AntennaPod/3.0 (Android)"],
@@ -40,7 +40,7 @@ def test_parse_request_captures_cf_ipcountry() -> None:
         event(
             request={
                 "method": "GET",
-                "uri": "/token-token-token-1234/feed.xml",
+                "uri": "/feed.xml",
                 "headers": {"Cf-Ipcountry": ["IT"]},
             },
             status=200,
@@ -61,7 +61,7 @@ def test_parse_request_retains_page_and_rss_requests() -> None:
     page = event(
         request={
             "method": "GET",
-            "uri": "/token-token-token-1234/index.html",
+            "uri": "/index.html",
             "headers": {},
         },
         status=200,
@@ -69,13 +69,35 @@ def test_parse_request_retains_page_and_rss_requests() -> None:
     rss = event(
         request={
             "method": "HEAD",
-            "uri": "/token-token-token-1234/feed.xml",
+            "uri": "/feed.xml",
             "headers": {},
         },
         status=200,
     )
     assert parse_request(page).request_kind == "page"
     assert parse_request(rss).request_kind == "rss"
+    transcript = event(
+        request={
+            "method": "GET",
+            "uri": "/episodes/episode-name/transcript.html",
+            "headers": {},
+        },
+        status=200,
+    )
+    assert parse_request(transcript).request_kind == "page"
+    assert (
+        parse_request(
+            event(
+                request={
+                    "method": "GET",
+                    "uri": "/token-token-token-1234/feed.xml",
+                    "headers": {},
+                },
+                status=200,
+            )
+        )
+        is None
+    )
 
 
 def test_client_fields_and_sha256_are_stable() -> None:
@@ -88,13 +110,10 @@ def test_client_fields_and_sha256_are_stable() -> None:
 
 
 def test_geo_fields_are_nullable_and_tolerant() -> None:
-    fields = geo_fields({"geoip_country_code": "US", "geoip_latitude": "bad"})
-    assert fields.country_code == "US"
-    assert fields.latitude is None
-    assert geo_fields({}).country_name is None
+    assert geo_fields({}).country_code is None
     assert geo_fields({"country_code": "IT"}).country_code == "IT"
     assert geo_fields({}, header_country_code="DE").country_code == "DE"
     assert (
-        geo_fields({"geoip_country_code": "US"}, header_country_code="DE").country_code
-        == "US"
+        geo_fields({"country_code": "US"}, header_country_code="DE").country_code == "US"
     )
+    assert geo_fields({"geoip_country_code": "US"}).country_code is None
