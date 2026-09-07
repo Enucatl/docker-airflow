@@ -36,13 +36,17 @@ def _record(
     try:
         event = json.loads(line)
         parsed = parse_request(event)
-    except TypeError, ValueError, json.JSONDecodeError:
+    except (TypeError, ValueError, json.JSONDecodeError):
         logger.warning("statistics event parse failure")
         return None
     if parsed is None:
         return None
     client = classify_user_agent(parsed.user_agent)
-    geo = geo_fields(stream)
+    geo = geo_fields(
+        stream,
+        header_country_code=parsed.cloudflare.get("cf-ipcountry")
+        or parsed.cloudflare.get("cf-country"),
+    )
     return {
         "source_log_id": source_log_id(str(timestamp.timestamp()), stream, line),
         "observed_at": timestamp,

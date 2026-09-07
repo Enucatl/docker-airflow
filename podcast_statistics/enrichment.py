@@ -32,9 +32,15 @@ def _float(metadata: Mapping[str, str], key: str) -> float | None:
         return None
 
 
-def geo_fields(metadata: Mapping[str, str]) -> GeoFields:
+def geo_fields(
+    metadata: Mapping[str, str],
+    *,
+    header_country_code: str | None = None,
+) -> GeoFields:
     return GeoFields(
-        country_code=_text(metadata, "geoip_country_code"),
+        country_code=_text(metadata, "country_code")
+        or _text(metadata, "geoip_country_code")
+        or (header_country_code or None),
         country_name=_text(metadata, "geoip_country_name"),
         city=_text(metadata, "geoip_city"),
         continent=_text(metadata, "geoip_continent"),

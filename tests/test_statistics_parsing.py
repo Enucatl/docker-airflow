@@ -35,6 +35,21 @@ def test_parse_media_request_extracts_media_fields() -> None:
     assert parsed.trusted_client_ip == "8.8.8.8"
 
 
+def test_parse_request_captures_cf_ipcountry() -> None:
+    parsed = parse_request(
+        event(
+            request={
+                "method": "GET",
+                "uri": "/token-token-token-1234/feed.xml",
+                "headers": {"Cf-Ipcountry": ["IT"]},
+            },
+            status=200,
+        )
+    )
+    assert parsed is not None
+    assert parsed.cloudflare["cf-ipcountry"] == "IT"
+
+
 def test_parse_media_request_ignores_head_and_non_media() -> None:
     assert parse_media_request(event(status=404)) is None
     head = event()
@@ -77,3 +92,9 @@ def test_geo_fields_are_nullable_and_tolerant() -> None:
     assert fields.country_code == "US"
     assert fields.latitude is None
     assert geo_fields({}).country_name is None
+    assert geo_fields({"country_code": "IT"}).country_code == "IT"
+    assert geo_fields({}, header_country_code="DE").country_code == "DE"
+    assert (
+        geo_fields({"geoip_country_code": "US"}, header_country_code="DE").country_code
+        == "US"
+    )

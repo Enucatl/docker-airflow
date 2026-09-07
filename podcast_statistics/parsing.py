@@ -104,6 +104,7 @@ def parse_request(event: dict[str, Any]) -> MediaRequest | None:
         for key, value in (
             ("cf-ray", _header(request_headers, "Cf-Ray")),
             ("cf-cache-status", _header(request_headers, "Cf-Cache-Status")),
+            ("cf-ipcountry", _header(request_headers, "Cf-Ipcountry")),
             ("cf-country", _header(request_headers, "Cf-Country")),
         )
         if value is not None
