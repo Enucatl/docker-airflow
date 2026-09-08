@@ -5,7 +5,7 @@ import html
 import smtplib
 from typing import TYPE_CHECKING, Any
 
-import requests
+import niquests
 
 from automation_core.connections import Connection, VaultConnections
 
@@ -31,7 +31,7 @@ def send_telegram(
     payload: dict[str, str] = {"chat_id": connection.host, "text": text}
     if parse_mode:
         payload["parse_mode"] = parse_mode
-    response = requests.post(
+    response = niquests.post(
         f"https://api.telegram.org/bot{connection.password}/sendMessage",
         data=payload,
         timeout=30,

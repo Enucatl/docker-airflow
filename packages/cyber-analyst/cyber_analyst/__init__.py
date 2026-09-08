@@ -148,7 +148,7 @@ def analyze_signatures(
     from langgraph.graph import END, START, StateGraph
     from mac_vendor_lookup import MacLookup
     from pydantic import BaseModel, Field
-    import requests
+    import niquests
     from common.loki import query_loki_range, query_loki_range_adaptive
 
     LOKI_CONN_ID = "loki"
@@ -401,14 +401,14 @@ def analyze_signatures(
         if api_key := greynoise_conn.password or greynoise_extra.get("api_key"):
             greynoise_headers["key"] = api_key
         try:
-            response = requests.get(
+            response = niquests.get(
                 f"{greynoise_conn.host.rstrip('/')}/v3/community/{ip}",
                 headers=greynoise_headers,
                 timeout=30,
             )
             response.raise_for_status()
             findings["greynoise"] = response.json()
-        except requests.HTTPError as exc:
+        except niquests.HTTPError as exc:
             response = exc.response
             if response is not None and response.status_code == 429:
                 findings["greynoise_warning"] = rate_limit_warning(
@@ -427,7 +427,7 @@ def analyze_signatures(
         if api_key := abuse_conn.password or abuse_extra.get("api_key"):
             abuse_headers["Key"] = api_key
         try:
-            response = requests.get(
+            response = niquests.get(
                 f"{abuse_conn.host.rstrip('/')}/api/v2/check",
                 params={"ipAddress": ip, "maxAgeInDays": 90},
                 headers=abuse_headers,
@@ -435,7 +435,7 @@ def analyze_signatures(
             )
             response.raise_for_status()
             findings["abuseipdb"] = response.json()
-        except requests.HTTPError as exc:
+        except niquests.HTTPError as exc:
             response = exc.response
             if response is not None and response.status_code == 429:
                 findings["abuseipdb_warning"] = rate_limit_warning(
@@ -455,7 +455,7 @@ def analyze_signatures(
         tavily_conn, tavily_extra = get_connection_payload("tavily")
         api_key = tavily_conn.password or tavily_extra.get("api_key")
         try:
-            response = requests.post(
+            response = niquests.post(
                 f"{tavily_conn.host.rstrip('/')}/search",
                 json={
                     "api_key": api_key,
@@ -467,7 +467,7 @@ def analyze_signatures(
             )
             response.raise_for_status()
             return response.json()
-        except requests.HTTPError as exc:
+        except niquests.HTTPError as exc:
             response = exc.response
             if response is not None and response.status_code == 429:
                 return {

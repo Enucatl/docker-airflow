@@ -14,7 +14,7 @@ import logging
 import time
 from typing import Any, Iterable
 
-import requests
+import niquests
 from pydantic import BaseModel, Field
 
 from automation_core.clients import postgres_connect, send_email
@@ -382,7 +382,7 @@ def web_search(
 ) -> tuple[list[dict[str, str]], str | None]:
     connection = vault.get("tavily")
     try:
-        response = requests.post(
+        response = niquests.post(
             f"{connection.host.rstrip('/')}/search",
             json={
                 "api_key": connection.password or connection.extra.get("api_key"),

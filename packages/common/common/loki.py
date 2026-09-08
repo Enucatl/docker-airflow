@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 import logging
 from typing import Any
 
-import requests
+import niquests
 
 from automation_core.connections import Connection, VaultConnections
 
@@ -39,7 +39,7 @@ def query_loki_range(
     if tenant_id := extras.get("tenant_id"):
         headers["X-Scope-OrgID"] = tenant_id
     auth = (conn.login, conn.password) if conn.login and conn.password else None
-    response = requests.get(
+    response = niquests.get(
         endpoint,
         params={
             "query": query,

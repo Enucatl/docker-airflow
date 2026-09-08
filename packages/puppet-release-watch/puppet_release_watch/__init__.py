@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import requests
+import niquests
 
 from automation_core.clients import send_telegram
 from automation_core.connections import VaultConnections
@@ -18,7 +18,7 @@ def render_telegram_message(package_name: str) -> str:
 
 
 def run(vault: VaultConnections) -> None:
-    response = requests.get(INDEX_URL, timeout=30)
+    response = niquests.get(INDEX_URL, timeout=30)
     response.raise_for_status()
     package_name = next(
         (name for name in PACKAGE_NAMES if package_is_listed(response.text, name)),

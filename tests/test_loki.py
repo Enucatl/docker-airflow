@@ -33,7 +33,7 @@ def test_query_loki_range_uses_shared_ca_bundle(monkeypatch) -> None:
         return Response()
 
     set_vault(DummyVault())
-    monkeypatch.setattr("common.loki.requests.get", fake_get)
+    monkeypatch.setattr("common.loki.niquests.get", fake_get)
 
     result = query_loki_range(
         "loki",

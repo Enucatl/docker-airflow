@@ -8,7 +8,7 @@ from typing import Any
 
 import psycopg
 import pytest
-import requests
+import niquests
 
 
 @pytest.mark.skipif(
@@ -17,7 +17,7 @@ import requests
 )
 def test_loki_returns_parseable_caddy_payload() -> None:
     end = datetime.now(UTC)
-    response = requests.get(
+    response = niquests.get(
         f"{os.environ['STATISTICS_TEST_LOKI_URL'].rstrip('/')}/loki/api/v1/query_range",
         params={
             "query": '{service_name="barbero-scripts/caddy"}',

@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 import subprocess
 
-import requests
+import niquests
 
 from automation_core.connections import VaultConnections
 
@@ -24,7 +24,7 @@ def download_day(target_date: datetime) -> None:
     if opus.exists():
         logging.info("Opus file already exists: %s", opus)
         return
-    response = requests.get(
+    response = niquests.get(
         f"https://podcast-radio24.ilsole24ore.com/radio24_audio/{target_date:%Y}/{mp3.name}",
         stream=True,
         timeout=60,

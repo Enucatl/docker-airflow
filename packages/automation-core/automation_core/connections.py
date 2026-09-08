@@ -7,9 +7,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
 import hvac
-from requests import Session
-from requests.adapters import HTTPAdapter
-from urllib3.util import Retry
+from niquests import RetryConfiguration, Session
 
 
 @dataclass(frozen=True)
@@ -65,19 +63,16 @@ class VaultConnections:
         ca_cert = os.environ["VAULT_CACERT"]
         cert = os.getenv("VAULT_CLIENT_CERT", "/run/secrets/fullchain")
         key = os.getenv("VAULT_CLIENT_KEY", "/run/secrets/key")
-        session = Session()
-        session.verify = ca_cert
-        session.cert = (cert, key)
-        adapter = HTTPAdapter(
-            max_retries=Retry(
+        session = Session(
+            verify=ca_cert,
+            cert=(cert, key),
+            retries=RetryConfiguration(
                 total=3,
                 backoff_factor=0.1,
                 status_forcelist=[412, 500, 502, 503],
                 raise_on_status=False,
-            )
+            ),
         )
-        session.mount("http://", adapter)
-        session.mount("https://", adapter)
         self.client = hvac.Client(url=address, session=session)
         self.client.auth.cert.login(
             name=os.getenv("VAULT_CERT_ROLE", ""),

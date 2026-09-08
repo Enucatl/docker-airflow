@@ -10,7 +10,7 @@ dependencies = [
   "openinference-instrumentation-langchain",
   "psycopg[binary]",
   "pydantic",
-  "requests",
+  "niquests",
 ]
 
 [build-system]
