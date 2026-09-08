@@ -9,11 +9,10 @@ RUN useradd --uid 50000 --gid 0 --no-create-home --home-dir /opt/repo \
     apt-get install --yes --no-install-recommends git ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-COPY packages/automation-core ./packages/automation-core
-COPY images/operations-analyst/pyproject.toml images/operations-analyst/uv.lock ./images/operations-analyst/
+COPY pyproject.toml uv.lock ./
+COPY packages ./packages
+COPY images/operations-analyst/pyproject.toml ./images/operations-analyst/
 RUN uv sync --project images/operations-analyst --frozen --no-dev --no-install-project
-COPY automation ./automation
-COPY dags/common ./common
 COPY config/operations-repositories.json ./config/operations-repositories.json
 USER 50000:0
 ENTRYPOINT ["python", "-m", "automation.cli"]

@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from automation.pipelines.podcast_statistics import _record
+from podcast_statistics.pipeline import _record
 
 
 def test_record_maps_loki_event_without_raw_ip() -> None:

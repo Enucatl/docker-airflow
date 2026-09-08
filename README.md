@@ -1,68 +1,55 @@
 # Scheduled automation runners
 
-The five production automations run as short-lived Python 3.14 containers. Each
-pipeline directory under `images/` has its own Dockerfile, `pyproject.toml`,
-lockfile, image, and dependency environment:
+Short-lived Python 3.14 containers scheduled by Puppet-managed systemd timers.
+Each timer runs `docker compose run --build --rm --no-deps <service>` from
+`/opt/docker/airflow`. Only `postgres-outputs` is long-lived; runner services use
+the Compose `runner` profile and do not start with a normal `docker compose up -d`.
 
-Shared Vault, notification, SMTP, and PostgreSQL client code is packaged as
-`packages/automation-core`. The library has no lockfile; each runnable project
-locks the resolved version of the local package and its transitive dependencies.
+## Layout
 
-- `exam`: Playwright/Chromium and PostgreSQL
-- `download-zanzara`: requests and ffmpeg
-- `puppet-release-watch`: requests
-- `cyber-analyst`: PostgreSQL, LangGraph/LangChain, and OpenTelemetry
-- `operations-analyst`: weekly Loki reliability analysis with repository and web evidence
+- `packages/` — installable uv packages (`uv_build`): shared libs and one package per pipeline
+  - `automation-core` — Vault, Postgres, SMTP, Telegram
+  - `common` — Loki/SSL/Suricata helpers
+  - `automation` — CLI entrypoint (`python -m automation.cli`)
+  - `exam`, `download-zanzara`, `puppet-release-watch`, `cyber-analyst`,
+    `operations-analyst`, `podcast-statistics` — pipeline implementations
+- `images/<pipeline>/` — per-pipeline Dockerfile + thin Compose app project (`package = false`)
+- `config/` — Postgres init and operations-analyst repository manifest
+- `scripts/` — operational helpers
 
-The operations analyst runs Friday at 02:00 UTC. It synchronizes the public
-repositories listed in `config/operations-repositories.json` into its persistent
-corpus volume, analyzes operational errors (excluding specialized network/security
-telemetry), and emails diagnoses. Each actionable diagnosis contains a standalone
-Codex prompt for applying a minimal, tested fix from `/opt/docker` without committing.
-Its LLM endpoint is configured independently through the Vault connection
-`operations_analyst_openrouter`.
+This is a uv workspace (`packages/*`, `images/*`) with a single root `uv.lock`.
 
-Only `postgres-outputs` is long-lived. The runner services are behind the
-`runner` Compose profile and do not start with a normal `docker compose up -d`.
-Puppet manages the UTC systemd timers. A normal manual run uses, for example:
+## Pipelines
+
+| Service | Package | Schedule (UTC, via Puppet) |
+|---------|---------|----------------------------|
+| `exam` | `exam` | hourly `*:00:00` |
+| `download-zanzara` | `download-zanzara` | daily `00:00:00` |
+| `cyber-analyst` | `cyber-analyst` | monthly `01 03:00:00` |
+| `operations-analyst` | `operations-analyst` | Friday `02:00:00` |
+| `podcast-statistics` | `podcast-statistics` | every 15 min `*:00/15:00` |
+| `puppet-release-watch` | `puppet-release-watch` | image/CI only (no systemd timer) |
+
+Manual run example:
 
 ```bash
 systemctl start automation-exam.service
 ```
 
-Every service runs `docker compose run --build --rm --no-deps`, so changed
-source, lockfile, or image instructions are rebuilt before execution.
-
 ## Vault preflight
 
-Connections remain at `kv/airflow/connections/<connection_id>`. Every process
-authenticates with `/run/secrets/fullchain`, `/run/secrets/key`, and
-`VAULT_CACERT`; tokens are neither stored nor renewed. Before cutover, build an
-image and check all required connection payloads without business side effects:
+Connections remain at `kv/airflow/connections/<connection_id>`. Processes
+authenticate with `/run/secrets/fullchain`, `/run/secrets/key`, and `VAULT_CACERT`.
 
 ```bash
 docker compose run --build --rm --no-deps exam preflight
 ```
 
-## Cyber analyst cutover watermark
+## Operations analyst
 
-Before stopping Airflow, capture the final successful scheduled logical date:
-
-```bash
-BOUNDARY="$(docker compose exec -T postgres psql -U airflow -d airflow -Atc \
-  "SELECT max(logical_date) FROM dag_run WHERE dag_id = 'cyber_analyst' AND run_type = 'scheduled' AND state = 'success'")"
-test -n "$BOUNDARY"
-```
-
-After deploying the new Compose file and starting `postgres-outputs`, seed that
-captured value idempotently:
-
-```bash
-scripts/seed-cyber-watermark "$BOUNDARY"
-```
-
-The monthly runner refuses to run without a seed and advances the boundary only
-after the report email is delivered successfully.
+Runs Friday at 02:00 UTC. Synchronizes repositories from
+`config/operations-repositories.json`, analyzes operational errors, and emails
+diagnoses. LLM endpoint: Vault connection `operations_analyst_openrouter`.
 
 ## Cutover checks
 
@@ -72,7 +59,4 @@ systemctl list-timers 'automation-*'
 docker compose ps --services --filter status=running
 ```
 
-The idle service list must contain only `postgres-outputs`. Once the watermark
-is seeded and timers are installed, stop the former Airflow stack and remove its
-metadata PostgreSQL, Redis, log, and virtualenv volumes. Preserve
-`postgres-outputs-volume`.
+The idle service list must contain only `postgres-outputs`.

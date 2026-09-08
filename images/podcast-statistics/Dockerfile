@@ -10,13 +10,11 @@ RUN useradd --uid 50000 --gid 0 --no-create-home --home-dir /opt/repo \
     --shell /usr/sbin/nologin automation
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-COPY packages/automation-core ./packages/automation-core
-COPY images/podcast-statistics/pyproject.toml images/podcast-statistics/uv.lock ./images/podcast-statistics/
+COPY pyproject.toml uv.lock ./
+COPY packages ./packages
+COPY images/podcast-statistics/pyproject.toml ./images/podcast-statistics/
 RUN uv sync --project images/podcast-statistics --frozen --no-dev --no-install-project
 
-COPY automation ./automation
-COPY dags/common ./common
-COPY podcast_statistics ./podcast_statistics
 USER 50000:0
 ENTRYPOINT ["python", "-m", "automation.cli"]
 CMD ["main"]

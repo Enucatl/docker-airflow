@@ -3,14 +3,27 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+
 from automation_core.clients import notify_failure
 from automation_core.connections import VaultConnections
 
 
-def dispatch(name: str, vault: VaultConnections) -> None:
-    from automation.pipelines import run_pipeline
-
-    run_pipeline(name, vault)
+def run_pipeline(name: str, vault: VaultConnections) -> None:
+    if name == "exam":
+        from exam import run
+    elif name == "download-zanzara":
+        from download_zanzara import run
+    elif name == "puppet-release-watch":
+        from puppet_release_watch import run
+    elif name == "cyber-analyst":
+        from cyber_analyst import run
+    elif name == "operations-analyst":
+        from operations_analyst import run
+    elif name == "podcast-statistics":
+        from podcast_statistics.pipeline import run
+    else:
+        raise ValueError(f"Unknown pipeline: {name}")
+    run(vault)
 
 
 def main() -> int:
@@ -30,7 +43,7 @@ def main() -> int:
         if args.command == "preflight":
             vault.preflight()
         else:
-            dispatch(pipeline, vault)
+            run_pipeline(pipeline, vault)
     except Exception as error:
         logging.exception("Pipeline %s failed", pipeline)
         if vault is not None and args.command != "preflight":

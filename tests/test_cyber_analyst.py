@@ -14,11 +14,11 @@ from common.suricata_monthly_triage import (
     render_plaintext_report,
     run_signature_agent,
 )
-from automation.pipelines.cyber_analyst import (
+from cyber_analyst import (
     _collection_limit,
     _rate_limit_warning,
 )
-from automation.pipelines import cyber_analyst
+import cyber_analyst
 
 
 def test_previous_calendar_month_window() -> None:

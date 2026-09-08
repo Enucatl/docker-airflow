@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from automation.pipelines.puppet_release_watch import (
+from puppet_release_watch import (
     INDEX_URL,
     PACKAGE_NAMES,
     package_is_listed,

@@ -3,7 +3,7 @@ import subprocess
 
 import pytest
 
-from automation.pipelines.operations_analyst import (
+from operations_analyst import (
     CONTROL_PLANE_GUIDANCE,
     Evidence,
     Finding,
@@ -122,7 +122,7 @@ def test_unknown_actionable_findings_are_not_rendered_as_diagnoses():
 
 
 def test_historical_docker_host_fallback(monkeypatch):
-    import automation.pipelines.operations_analyst as analyst
+    import operations_analyst as analyst
 
     monkeypatch.setattr(
         "common.loki.query_loki_range_adaptive",
@@ -143,7 +143,7 @@ def test_historical_docker_host_fallback(monkeypatch):
 
 
 def test_triage_limits_are_conservative():
-    from automation.pipelines.operations_analyst import (
+    from operations_analyst import (
         MAX_MODEL_TEXT,
         MAX_REPOSITORY_TEXT,
         MAX_TRIAGE_FINDINGS,

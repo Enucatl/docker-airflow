@@ -8,8 +8,6 @@ on:
       - ".github/workflows/build.yaml"
       - "pyproject.toml"
       - "uv.lock"
-      - "automation/**"
-      - "dags/common/**"
       - "images/**"
       - "packages/**"
   pull_request:
@@ -17,8 +15,6 @@ on:
       - ".github/workflows/build.yaml"
       - "pyproject.toml"
       - "uv.lock"
-      - "automation/**"
-      - "dags/common/**"
       - "images/**"
       - "packages/**"
 
@@ -61,6 +57,7 @@ jobs:
           - puppet-release-watch
           - cyber-analyst
           - operations-analyst
+          - podcast-statistics
     permissions:
       contents: read
       packages: write

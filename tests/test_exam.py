@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from automation.pipelines.exam import (
+from exam import (
     render_appointments_for_telegram,
     _parse_appointment_datetime,
     _split_appointment_changes,

@@ -5,42 +5,37 @@ requires-python = ">=3.14,<3.15"
 dependencies = []
 
 [dependency-groups]
-common = ["hvac", "requests"]
-exam = [
-  { include-group = "common" },
-  "playwright",
-  "psycopg[binary]",
-]
-download-zanzara = [{ include-group = "common" }]
-puppet-release-watch = [{ include-group = "common" }]
-cyber-analyst = [
-  { include-group = "common" },
-  "arize-phoenix-otel",
-  "langchain-openai",
-  "langgraph",
-  "mac-vendor-lookup",
-  "openinference-instrumentation-langchain",
-  "psycopg[binary]",
-  "pydantic",
-]
-operations-analyst = [
-  { include-group = "common" },
-  "arize-phoenix-otel",
-  "langchain-openai",
-  "psycopg[binary]",
-  "pydantic",
-]
 dev = [
-  { include-group = "exam" },
-  { include-group = "cyber-analyst" },
-  { include-group = "operations-analyst" },
+  "automation",
+  "automation-core",
+  "common",
+  "cyber-analyst",
+  "download-zanzara",
+  "exam",
+  "operations-analyst",
+  "podcast-statistics",
+  "puppet-release-watch",
   "pytest",
   "ruff",
 ]
 
 [tool.uv]
 default-groups = ["dev"]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*", "images/*"]
+
+[tool.uv.sources]
+automation = { workspace = true }
+automation-core = { workspace = true }
+common = { workspace = true }
+cyber-analyst = { workspace = true }
+download-zanzara = { workspace = true }
+exam = { workspace = true }
+operations-analyst = { workspace = true }
+podcast-statistics = { workspace = true }
+puppet-release-watch = { workspace = true }
 
 [tool.pytest.ini_options]
-pythonpath = [".", "dags", "packages/automation-core"]
 testpaths = ["tests"]

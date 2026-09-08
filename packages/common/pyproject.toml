@@ -1,8 +1,8 @@
 [project]
-name = "automation-core"
+name = "common"
 version = "0.1.0"
 requires-python = ">=3.14,<3.15"
-dependencies = ["hvac", "requests"]
+dependencies = ["automation-core", "requests"]
 
 [build-system]
 requires = ["uv_build>=0.12.10,<0.13.0"]
@@ -10,3 +10,6 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-root = ""
+
+[tool.uv.sources]
+automation-core = { workspace = true }

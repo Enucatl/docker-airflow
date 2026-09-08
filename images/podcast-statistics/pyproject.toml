@@ -2,10 +2,11 @@
 name = "automation-podcast-statistics"
 version = "0.1.0"
 requires-python = ">=3.14,<3.15"
-dependencies = ["automation-core", "psycopg[binary]", "requests"]
+dependencies = ["automation", "podcast-statistics"]
 
 [tool.uv]
 package = false
 
 [tool.uv.sources]
-automation-core = { path = "../../packages/automation-core" }
+automation = { workspace = true }
+podcast-statistics = { workspace = true }

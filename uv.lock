@@ -2,6 +2,26 @@ version = 1
 revision = 3
 requires-python = "==3.14.*"
 
+[manifest]
+members = [
+    "automation",
+    "automation-core",
+    "automation-cyber-analyst",
+    "automation-download-zanzara",
+    "automation-exam",
+    "automation-operations-analyst",
+    "automation-pipelines",
+    "automation-podcast-statistics",
+    "automation-puppet-release-watch",
+    "common",
+    "cyber-analyst",
+    "download-zanzara",
+    "exam",
+    "operations-analyst",
+    "podcast-statistics",
+    "puppet-release-watch",
+]
+
 [[package]]
 name = "aiofiles"
 version = "25.1.0"
@@ -140,116 +160,156 @@ wheels = [
 ]
 
 [[package]]
-name = "automation-pipelines"
+name = "automation"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "packages/automation" }
+dependencies = [
+    { name = "automation-core" },
+]
 
-[package.dev-dependencies]
-common = [
-    { name = "hvac" },
-    { name = "requests" },
-]
-cyber-analyst = [
-    { name = "arize-phoenix-otel" },
-    { name = "hvac" },
-    { name = "langchain-openai" },
-    { name = "langgraph" },
-    { name = "mac-vendor-lookup" },
-    { name = "openinference-instrumentation-langchain" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "pydantic" },
-    { name = "requests" },
-]
-dev = [
-    { name = "arize-phoenix-otel" },
-    { name = "hvac" },
-    { name = "langchain-openai" },
-    { name = "langgraph" },
-    { name = "mac-vendor-lookup" },
-    { name = "openinference-instrumentation-langchain" },
-    { name = "playwright" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "pydantic" },
-    { name = "pytest" },
-    { name = "requests" },
-    { name = "ruff" },
-]
-download-zanzara = [
-    { name = "hvac" },
-    { name = "requests" },
-]
-exam = [
-    { name = "hvac" },
-    { name = "playwright" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "requests" },
-]
-operations-analyst = [
-    { name = "arize-phoenix-otel" },
-    { name = "hvac" },
-    { name = "langchain-openai" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "pydantic" },
-    { name = "requests" },
-]
-puppet-release-watch = [
+[package.metadata]
+requires-dist = [{ name = "automation-core", editable = "packages/automation-core" }]
+
+[[package]]
+name = "automation-core"
+version = "0.1.0"
+source = { editable = "packages/automation-core" }
+dependencies = [
     { name = "hvac" },
     { name = "requests" },
 ]
 
 [package.metadata]
+requires-dist = [
+    { name = "hvac" },
+    { name = "requests" },
+]
 
-[package.metadata.requires-dev]
-common = [
-    { name = "hvac" },
-    { name = "requests" },
+[[package]]
+name = "automation-cyber-analyst"
+version = "0.1.0"
+source = { virtual = "images/cyber-analyst" }
+dependencies = [
+    { name = "automation" },
+    { name = "cyber-analyst" },
 ]
-cyber-analyst = [
-    { name = "arize-phoenix-otel" },
-    { name = "hvac" },
-    { name = "langchain-openai" },
-    { name = "langgraph" },
-    { name = "mac-vendor-lookup" },
-    { name = "openinference-instrumentation-langchain" },
-    { name = "psycopg", extras = ["binary"] },
-    { name = "pydantic" },
-    { name = "requests" },
+
+[package.metadata]
+requires-dist = [
+    { name = "automation", editable = "packages/automation" },
+    { name = "cyber-analyst", editable = "packages/cyber-analyst" },
 ]
+
+[[package]]
+name = "automation-download-zanzara"
+version = "0.1.0"
+source = { virtual = "images/download-zanzara" }
+dependencies = [
+    { name = "automation" },
+    { name = "download-zanzara" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "automation", editable = "packages/automation" },
+    { name = "download-zanzara", editable = "packages/download-zanzara" },
+]
+
+[[package]]
+name = "automation-exam"
+version = "0.1.0"
+source = { virtual = "images/exam" }
+dependencies = [
+    { name = "automation" },
+    { name = "exam" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "automation", editable = "packages/automation" },
+    { name = "exam", editable = "packages/exam" },
+]
+
+[[package]]
+name = "automation-operations-analyst"
+version = "0.1.0"
+source = { virtual = "images/operations-analyst" }
+dependencies = [
+    { name = "automation" },
+    { name = "operations-analyst" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "automation", editable = "packages/automation" },
+    { name = "operations-analyst", editable = "packages/operations-analyst" },
+]
+
+[[package]]
+name = "automation-pipelines"
+version = "0.1.0"
+source = { virtual = "." }
+
+[package.dev-dependencies]
 dev = [
-    { name = "arize-phoenix-otel" },
-    { name = "hvac" },
-    { name = "langchain-openai" },
-    { name = "langgraph" },
-    { name = "mac-vendor-lookup" },
-    { name = "openinference-instrumentation-langchain" },
-    { name = "playwright" },
-    { name = "psycopg", extras = ["binary"] },
-    { name = "pydantic" },
+    { name = "automation" },
+    { name = "automation-core" },
+    { name = "common" },
+    { name = "cyber-analyst" },
+    { name = "download-zanzara" },
+    { name = "exam" },
+    { name = "operations-analyst" },
+    { name = "podcast-statistics" },
+    { name = "puppet-release-watch" },
     { name = "pytest" },
-    { name = "requests" },
     { name = "ruff" },
 ]
-download-zanzara = [
-    { name = "hvac" },
-    { name = "requests" },
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "automation", editable = "packages/automation" },
+    { name = "automation-core", editable = "packages/automation-core" },
+    { name = "common", editable = "packages/common" },
+    { name = "cyber-analyst", editable = "packages/cyber-analyst" },
+    { name = "download-zanzara", editable = "packages/download-zanzara" },
+    { name = "exam", editable = "packages/exam" },
+    { name = "operations-analyst", editable = "packages/operations-analyst" },
+    { name = "podcast-statistics", editable = "packages/podcast-statistics" },
+    { name = "puppet-release-watch", editable = "packages/puppet-release-watch" },
+    { name = "pytest" },
+    { name = "ruff" },
 ]
-exam = [
-    { name = "hvac" },
-    { name = "playwright" },
-    { name = "psycopg", extras = ["binary"] },
-    { name = "requests" },
+
+[[package]]
+name = "automation-podcast-statistics"
+version = "0.1.0"
+source = { virtual = "images/podcast-statistics" }
+dependencies = [
+    { name = "automation" },
+    { name = "podcast-statistics" },
 ]
-operations-analyst = [
-    { name = "arize-phoenix-otel" },
-    { name = "hvac" },
-    { name = "langchain-openai" },
-    { name = "psycopg", extras = ["binary"] },
-    { name = "pydantic" },
-    { name = "requests" },
+
+[package.metadata]
+requires-dist = [
+    { name = "automation", editable = "packages/automation" },
+    { name = "podcast-statistics", editable = "packages/podcast-statistics" },
 ]
-puppet-release-watch = [
-    { name = "hvac" },
-    { name = "requests" },
+
+[[package]]
+name = "automation-puppet-release-watch"
+version = "0.1.0"
+source = { virtual = "images/puppet-release-watch" }
+dependencies = [
+    { name = "automation" },
+    { name = "puppet-release-watch" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "automation", editable = "packages/automation" },
+    { name = "puppet-release-watch", editable = "packages/puppet-release-watch" },
 ]
 
 [[package]]
@@ -312,12 +372,90 @@ wheels = [
 ]
 
 [[package]]
+name = "common"
+version = "0.1.0"
+source = { editable = "packages/common" }
+dependencies = [
+    { name = "automation-core" },
+    { name = "requests" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "automation-core", editable = "packages/automation-core" },
+    { name = "requests" },
+]
+
+[[package]]
+name = "cyber-analyst"
+version = "0.1.0"
+source = { editable = "packages/cyber-analyst" }
+dependencies = [
+    { name = "arize-phoenix-otel" },
+    { name = "automation-core" },
+    { name = "common" },
+    { name = "langchain-openai" },
+    { name = "langgraph" },
+    { name = "mac-vendor-lookup" },
+    { name = "openinference-instrumentation-langchain" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "pydantic" },
+    { name = "requests" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "arize-phoenix-otel" },
+    { name = "automation-core", editable = "packages/automation-core" },
+    { name = "common", editable = "packages/common" },
+    { name = "langchain-openai" },
+    { name = "langgraph" },
+    { name = "mac-vendor-lookup" },
+    { name = "openinference-instrumentation-langchain" },
+    { name = "psycopg", extras = ["binary"] },
+    { name = "pydantic" },
+    { name = "requests" },
+]
+
+[[package]]
 name = "distro"
 version = "1.9.0"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/fc/f8/98eea607f65de6527f8a2e8885fc8015d3e6f5775df186e443e0964a11c3/distro-1.9.0.tar.gz", hash = "sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed", size = 60722, upload-time = "2023-12-24T09:54:32.31Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/12/b3/231ffd4ab1fc9d679809f356cebee130ac7daa00d6d6f3206dd4fd137e9e/distro-1.9.0-py3-none-any.whl", hash = "sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2", size = 20277, upload-time = "2023-12-24T09:54:30.421Z" },
+]
+
+[[package]]
+name = "download-zanzara"
+version = "0.1.0"
+source = { editable = "packages/download-zanzara" }
+dependencies = [
+    { name = "automation-core" },
+    { name = "requests" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "automation-core", editable = "packages/automation-core" },
+    { name = "requests" },
+]
+
+[[package]]
+name = "exam"
+version = "0.1.0"
+source = { editable = "packages/exam" }
+dependencies = [
+    { name = "automation-core" },
+    { name = "playwright" },
+    { name = "psycopg", extra = ["binary"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "automation-core", editable = "packages/automation-core" },
+    { name = "playwright" },
+    { name = "psycopg", extras = ["binary"] },
 ]
 
 [[package]]
@@ -933,6 +1071,33 @@ wheels = [
 ]
 
 [[package]]
+name = "operations-analyst"
+version = "0.1.0"
+source = { editable = "packages/operations-analyst" }
+dependencies = [
+    { name = "arize-phoenix-otel" },
+    { name = "automation-core" },
+    { name = "common" },
+    { name = "langchain-openai" },
+    { name = "openinference-instrumentation-langchain" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "pydantic" },
+    { name = "requests" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "arize-phoenix-otel" },
+    { name = "automation-core", editable = "packages/automation-core" },
+    { name = "common", editable = "packages/common" },
+    { name = "langchain-openai" },
+    { name = "openinference-instrumentation-langchain" },
+    { name = "psycopg", extras = ["binary"] },
+    { name = "pydantic" },
+    { name = "requests" },
+]
+
+[[package]]
 name = "orjson"
 version = "3.11.9"
 source = { registry = "https://pypi.org/simple" }
@@ -1011,6 +1176,25 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f9/e2/3e91f31a7d2b083fe6ef3fa267035b518369d9511ffab804f839851d2779/pluggy-1.6.0.tar.gz", hash = "sha256:7dcc130b76258d33b90f61b658791dede3486c3e6bfb003ee5c9bfb396dd22f3", size = 69412, upload-time = "2025-05-15T12:30:07.975Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl", hash = "sha256:e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746", size = 20538, upload-time = "2025-05-15T12:30:06.134Z" },
+]
+
+[[package]]
+name = "podcast-statistics"
+version = "0.1.0"
+source = { editable = "packages/podcast-statistics" }
+dependencies = [
+    { name = "automation-core" },
+    { name = "common" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "requests" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "automation-core", editable = "packages/automation-core" },
+    { name = "common", editable = "packages/common" },
+    { name = "psycopg", extras = ["binary"] },
+    { name = "requests" },
 ]
 
 [[package]]
@@ -1104,6 +1288,21 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c7/2c/a4981bf42cf30ebba0424971d7ce70a222ae9b82594c42fc3f2105d7b525/psycopg_binary-3.3.3-cp314-cp314-musllinux_1_2_riscv64.whl", hash = "sha256:47f06fcbe8542b4d96d7392c476a74ada521c5aebdb41c3c0155f6595fc14c8d", size = 3944542, upload-time = "2026-02-18T16:52:04.266Z" },
     { url = "https://files.pythonhosted.org/packages/60/e9/b7c29b56aa0b85a4e0c4d89db691c1ceef08f46a356369144430c155a2f5/psycopg_binary-3.3.3-cp314-cp314-musllinux_1_2_x86_64.whl", hash = "sha256:e7800e6c6b5dc4b0ca7cc7370f770f53ac83886b76afda0848065a674231e856", size = 4254339, upload-time = "2026-02-18T16:52:10.444Z" },
     { url = "https://files.pythonhosted.org/packages/98/5a/291d89f44d3820fffb7a04ebc8f3ef5dda4f542f44a5daea0c55a84abf45/psycopg_binary-3.3.3-cp314-cp314-win_amd64.whl", hash = "sha256:165f22ab5a9513a3d7425ffb7fcc7955ed8ccaeef6d37e369d6cc1dff1582383", size = 3652796, upload-time = "2026-02-18T16:52:14.02Z" },
+]
+
+[[package]]
+name = "puppet-release-watch"
+version = "0.1.0"
+source = { editable = "packages/puppet-release-watch" }
+dependencies = [
+    { name = "automation-core" },
+    { name = "requests" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "automation-core", editable = "packages/automation-core" },
+    { name = "requests" },
 ]
 
 [[package]]

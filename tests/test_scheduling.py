@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import subprocess
 
-from automation.pipelines.download_zanzara import scheduled_date_range
+from download_zanzara import scheduled_date_range
 
 
 def test_zanzara_scheduled_range_includes_previous_day_and_boundary() -> None:

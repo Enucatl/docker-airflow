@@ -10,11 +10,11 @@ RUN useradd --uid 50000 --gid 0 --no-create-home --home-dir /opt/repo \
     --shell /usr/sbin/nologin automation
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-COPY packages/automation-core ./packages/automation-core
-COPY images/puppet-release-watch/pyproject.toml images/puppet-release-watch/uv.lock ./images/puppet-release-watch/
+COPY pyproject.toml uv.lock ./
+COPY packages ./packages
+COPY images/puppet-release-watch/pyproject.toml ./images/puppet-release-watch/
 RUN uv sync --project images/puppet-release-watch --frozen --no-dev --no-install-project
 
-COPY automation ./automation
 USER 50000:0
 ENTRYPOINT ["python", "-m", "automation.cli"]
 CMD ["main"]
