@@ -10,8 +10,13 @@ RUN useradd --uid 50000 --gid 0 --no-create-home --home-dir /opt/repo \
     rm -rf /var/lib/apt/lists/*
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock ./
-COPY packages ./packages
+COPY packages/automation-core/pyproject.toml ./packages/automation-core/
+COPY packages/automation/pyproject.toml ./packages/automation/
+COPY packages/common/pyproject.toml ./packages/common/
+COPY packages/operations-analyst/pyproject.toml ./packages/operations-analyst/
 COPY images/operations-analyst/pyproject.toml ./images/operations-analyst/
+RUN uv sync --project images/operations-analyst --frozen --no-dev --no-install-workspace
+COPY packages ./packages
 RUN uv sync --project images/operations-analyst --frozen --no-dev --no-install-project
 COPY config/operations-repositories.json ./config/operations-repositories.json
 USER 50000:0

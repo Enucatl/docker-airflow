@@ -11,8 +11,13 @@ RUN useradd --uid 50000 --gid 0 --no-create-home --home-dir /opt/repo \
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock ./
-COPY packages ./packages
+COPY packages/automation-core/pyproject.toml ./packages/automation-core/
+COPY packages/automation/pyproject.toml ./packages/automation/
+COPY packages/common/pyproject.toml ./packages/common/
+COPY packages/cyber-analyst/pyproject.toml ./packages/cyber-analyst/
 COPY images/cyber-analyst/pyproject.toml ./images/cyber-analyst/
+RUN uv sync --project images/cyber-analyst --frozen --no-dev --no-install-workspace
+COPY packages ./packages
 RUN uv sync --project images/cyber-analyst --frozen --no-dev --no-install-project
 
 USER 50000:0
