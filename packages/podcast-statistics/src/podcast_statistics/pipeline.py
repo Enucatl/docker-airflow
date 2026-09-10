@@ -36,7 +36,7 @@ def _record(
     try:
         event = json.loads(line)
         parsed = parse_request(event)
-    except (TypeError, ValueError, json.JSONDecodeError):
+    except TypeError, ValueError, json.JSONDecodeError:
         logger.warning("statistics event parse failure")
         return None
     if parsed is None:

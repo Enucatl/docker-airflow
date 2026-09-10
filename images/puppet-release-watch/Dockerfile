@@ -1,6 +1,6 @@
 FROM python:3.14-slim
 
-ENV PATH=/opt/repo/images/puppet-release-watch/.venv/bin:$PATH \
+ENV PATH=/opt/repo/.venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy

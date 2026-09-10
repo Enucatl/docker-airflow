@@ -114,6 +114,7 @@ def test_geo_fields_are_nullable_and_tolerant() -> None:
     assert geo_fields({"country_code": "IT"}).country_code == "IT"
     assert geo_fields({}, header_country_code="DE").country_code == "DE"
     assert (
-        geo_fields({"country_code": "US"}, header_country_code="DE").country_code == "US"
+        geo_fields({"country_code": "US"}, header_country_code="DE").country_code
+        == "US"
     )
     assert geo_fields({"geoip_country_code": "US"}).country_code is None

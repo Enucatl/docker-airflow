@@ -7,7 +7,7 @@ the Compose `runner` profile and do not start with a normal `docker compose up -
 
 ## Layout
 
-- `packages/` — installable uv packages (`uv_build`): shared libs and one package per pipeline
+- `packages/` — installable uv packages (`uv_build`), each using a `src/` layout: shared libs and one package per pipeline
   - `automation-core` — Vault, Postgres, SMTP, Telegram
   - `common` — Loki/SSL/Suricata helpers
   - `automation` — CLI entrypoint (`python -m automation.cli`)

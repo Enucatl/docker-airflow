@@ -17,9 +17,6 @@ dependencies = [
 requires = ["uv_build>=0.12.10,<0.13.0"]
 build-backend = "uv_build"
 
-[tool.uv.build-backend]
-module-root = ""
-
 [tool.uv.sources]
 automation-core = { workspace = true }
 common = { workspace = true }

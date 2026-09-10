@@ -6,9 +6,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 
-_MEDIA_PATH = re.compile(
-    r"^/media/(?P<episode>.+)-[0-9a-f]{16}\.mp3$"
-)
+_MEDIA_PATH = re.compile(r"^/media/(?P<episode>.+)-[0-9a-f]{16}\.mp3$")
 _RSS_PATH = re.compile(r"^/feed\.xml$")
 _PAGE_PATH = re.compile(
     r"^/(?:index\.html)?$"

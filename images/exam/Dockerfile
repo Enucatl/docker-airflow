@@ -1,6 +1,6 @@
 FROM python:3.14-slim
 
-ENV PATH=/opt/repo/images/exam/.venv/bin:$PATH \
+ENV PATH=/opt/repo/.venv/bin:$PATH \
     PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
     PYTHONUNBUFFERED=1 \
     UV_COMPILE_BYTECODE=1 \
