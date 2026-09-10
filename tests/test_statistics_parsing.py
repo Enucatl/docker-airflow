@@ -50,6 +50,10 @@ def test_parse_request_captures_cf_ipcountry() -> None:
     assert parsed.cloudflare["cf-ipcountry"] == "IT"
 
 
+def test_parse_request_ignores_non_access_events() -> None:
+    assert parse_request({"level": "info", "logger": "tls", "msg": "finished"}) is None
+
+
 def test_parse_media_request_ignores_head_and_non_media() -> None:
     assert parse_media_request(event(status=404)) is None
     head = event()

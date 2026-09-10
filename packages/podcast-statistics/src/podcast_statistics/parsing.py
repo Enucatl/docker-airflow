@@ -59,7 +59,7 @@ def _integer(value: Any, field: str, *, default: int = 0) -> int:
 def parse_request(event: dict[str, Any]) -> MediaRequest | None:
     request = event.get("request")
     if not isinstance(request, dict):
-        raise ValueError("Caddy event has no request object")
+        return None
     method = str(request.get("method") or "")
     if method not in ("GET", "HEAD"):
         return None
