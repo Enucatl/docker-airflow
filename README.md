@@ -51,6 +51,9 @@ Runs Friday at 02:00 UTC. Synchronizes repositories from
 `config/operations-repositories.json`, analyzes operational errors, and emails
 diagnoses. LLM endpoint: Vault connection `operations_analyst_openrouter`.
 
+The cyber analyst uses the dedicated Vault connection
+`cyber_analyst_openrouter`.
+
 ## Cutover checks
 
 ```bash

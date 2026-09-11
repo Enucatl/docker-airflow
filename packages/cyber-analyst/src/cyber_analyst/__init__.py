@@ -479,12 +479,12 @@ def analyze_signatures(
         except Exception as exc:
             return {"warning": f"Missing CVE context for {signature}: {exc}"}
 
-    openai_conn, openai_extra = get_connection_payload("openai_compatible")
-    model_name = openai_extra.get("model", "gpt-4.1")
+    cyber_conn, cyber_extra = get_connection_payload("cyber_analyst_openrouter")
+    model_name = cyber_extra.get("model", "deepseek/deepseek-v4.1-flash")
     llm = ChatOpenAI(
         model=model_name,
-        api_key=openai_conn.password,
-        base_url=openai_conn.host,
+        api_key=cyber_conn.password,
+        base_url=cyber_conn.host,
         temperature=0,
     )
 

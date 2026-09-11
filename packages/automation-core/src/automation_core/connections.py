@@ -97,7 +97,7 @@ class VaultConnections:
             "telegram_default",
             "smtp_default",
             "loki",
-            "openai_compatible",
+            "cyber_analyst_openrouter",
             "operations_analyst_openrouter",
             "greynoise",
             "abuseipdb",
