@@ -372,6 +372,64 @@ def test_auto_falls_back_once_for_unsupported_native_output(monkeypatch):
     assert captured[1].kwargs["extra_body"]["provider"] == {"data_collection": "deny"}
 
 
+def test_auto_falls_back_for_openrouter_no_endpoints_native_response(monkeypatch):
+    captured = []
+    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    response = httpx.Response(404, request=request)
+    native_error = openai.NotFoundError(
+        "No endpoints found for this model",
+        response=response,
+        body={"error": {"message": "No endpoints found for this model"}},
+    )
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            captured.append(self)
+
+        def with_structured_output(self, _schema, **_kwargs):
+            return self
+
+        def invoke(self, _prompt):
+            if self.kwargs["extra_body"]["provider"].get("require_parameters"):
+                raise native_error
+            return AIMessage(
+                content=json.dumps(
+                    {
+                        "decisions": [
+                            {
+                                "fingerprint": "fingerprint",
+                                "classification": "expected_noise",
+                            }
+                        ]
+                    }
+                )
+            )
+
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", Client)
+    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
+
+    analyzed, warnings = analyze_findings(_Vault(), [finding], None)
+
+    assert not warnings
+    assert analyzed[0].classification == "expected_noise"
+    assert len(captured) == 2
+
+
+def test_no_endpoints_in_compatibility_mode_remains_permanent(monkeypatch):
+    import operations_analyst as analyst
+
+    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    response = httpx.Response(404, request=request)
+    error = openai.NotFoundError(
+        "No endpoints found for this model",
+        response=response,
+        body={"error": {"message": "No endpoints found for this model"}},
+    )
+
+    assert analyst._normalize_llm_exception(error, "prompt_json") is None
+
+
 @pytest.mark.parametrize("status", [401, 403])
 def test_authentication_and_authorization_failures_escape(monkeypatch, status):
     request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")

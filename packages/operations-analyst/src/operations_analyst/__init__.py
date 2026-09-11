@@ -264,7 +264,7 @@ def _is_empty_generation_index_error(exception: IndexError) -> bool:
     )
 
 
-def _unsupported_structured_output(exception: BaseException) -> bool:
+def _unsupported_structured_output(exception: BaseException, mode: str | None) -> bool:
     status_code, provider_error_code, _request_id = _request_metadata(exception)
     body = getattr(exception, "body", None)
     body_error = body.get("error") if isinstance(body, dict) else None
@@ -275,11 +275,13 @@ def _unsupported_structured_output(exception: BaseException) -> bool:
         "response_format_not_supported",
     }:
         return True
-    if status_code not in {400, 422}:
-        return False
     message = str(exception).lower()
     if isinstance(body_error, dict) and isinstance(body_error.get("message"), str):
         message += " " + body_error["message"].lower()
+    if status_code == 404:
+        return mode == "json_schema" and "no endpoints found" in message
+    if status_code not in {400, 422}:
+        return False
     mentions_format = any(
         term in message
         for term in (
@@ -304,7 +306,9 @@ def _unsupported_structured_output(exception: BaseException) -> bool:
     return mentions_format and mentions_unsupported
 
 
-def _normalize_llm_exception(exception: BaseException) -> LLMFailure | None:
+def _normalize_llm_exception(
+    exception: BaseException, mode: str | None = None
+) -> LLMFailure | None:
     """Map known provider/parser failures without retaining unsafe error text."""
     import openai
     from langchain_core.exceptions import OutputParserException
@@ -353,7 +357,7 @@ def _normalize_llm_exception(exception: BaseException) -> LLMFailure | None:
         "Structured Output response does not have a 'parsed' field nor a 'refusal' field."
     ):
         return LLMFailure(FailureReason.EMPTY_OR_MALFORMED_RESPONSE, **metadata)
-    if _unsupported_structured_output(exception):
+    if _unsupported_structured_output(exception, mode):
         return LLMFailure(FailureReason.UNSUPPORTED_STRUCTURED_OUTPUT, **metadata)
     if isinstance(
         exception, (openai.AuthenticationError, openai.PermissionDeniedError)
@@ -852,7 +856,7 @@ def analyze_findings(
                         raw_result = client.invoke(compatibility_prompt)
                     result = _validate_model_result(raw_result, schema, mode)
                 except Exception as exception:
-                    failure = _normalize_llm_exception(exception)
+                    failure = _normalize_llm_exception(exception, mode)
                     if failure is None:
                         raise
                     elapsed = time.monotonic() - started
