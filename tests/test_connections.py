@@ -1,4 +1,5 @@
 from automation_core.connections import VaultConnections, parse_connection
+import hvac
 
 
 def test_parse_legacy_vault_connection() -> None:
@@ -67,3 +68,43 @@ def test_vault_uses_certificate_session(monkeypatch) -> None:
         "/run/secrets/key",
     )
     assert captured["login"]["mount_point"] == "cert"
+
+
+def test_vault_reauthenticates_after_expired_token(monkeypatch) -> None:
+    captured: dict[str, int] = {"logins": 0, "reads": 0}
+
+    class Auth:
+        class Cert:
+            def login(self, **kwargs) -> None:
+                captured["logins"] += 1
+
+        cert = Cert()
+
+    class KV:
+        class V2:
+            def read_secret_version(self, **kwargs) -> dict[str, object]:
+                captured["reads"] += 1
+                if captured["reads"] == 1:
+                    raise hvac.exceptions.Forbidden("invalid token")
+                return {"data": {"data": {"host": "db"}}}
+
+        v2 = V2()
+
+    class Secrets:
+        kv = KV()
+
+    class Client:
+        auth = Auth()
+        secrets = Secrets()
+
+        def is_authenticated(self) -> bool:
+            return True
+
+    monkeypatch.setenv("VAULT_ADDR", "https://vault.example")
+    monkeypatch.setenv("VAULT_CACERT", "/ca.pem")
+    monkeypatch.setattr(
+        "automation_core.connections.hvac.Client", lambda **kwargs: Client()
+    )
+
+    assert VaultConnections().get("data").host == "db"
+    assert captured == {"logins": 2, "reads": 2}

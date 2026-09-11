@@ -63,6 +63,9 @@ class VaultConnections:
         ca_cert = os.environ["VAULT_CACERT"]
         cert = os.getenv("VAULT_CLIENT_CERT", "/run/secrets/fullchain")
         key = os.getenv("VAULT_CLIENT_KEY", "/run/secrets/key")
+        self._cert = cert
+        self._key = key
+        self._cert_role = os.getenv("VAULT_CERT_ROLE", "")
         session = Session(
             verify=ca_cert,
             cert=(cert, key),
@@ -74,19 +77,28 @@ class VaultConnections:
             ),
         )
         self.client = hvac.Client(url=address, session=session)
+        self._login()
+
+    def _login(self) -> None:
         self.client.auth.cert.login(
-            name=os.getenv("VAULT_CERT_ROLE", ""),
-            cert_pem=cert,
-            key_pem=key,
+            name=self._cert_role,
+            cert_pem=self._cert,
+            key_pem=self._key,
             mount_point="cert",
         )
         if not self.client.is_authenticated():
             raise RuntimeError("Vault certificate authentication failed")
 
     def get(self, connection_id: str) -> Connection:
-        response = self.client.secrets.kv.v2.read_secret_version(
-            path=f"airflow/connections/{connection_id}", mount_point="kv"
-        )
+        try:
+            response = self.client.secrets.kv.v2.read_secret_version(
+                path=f"airflow/connections/{connection_id}", mount_point="kv"
+            )
+        except hvac.exceptions.Forbidden:
+            self._login()
+            response = self.client.secrets.kv.v2.read_secret_version(
+                path=f"airflow/connections/{connection_id}", mount_point="kv"
+            )
         return parse_connection(response["data"]["data"])
 
     def preflight(self) -> None:
