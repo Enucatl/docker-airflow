@@ -14,11 +14,11 @@ def test_build_window_applies_delay_overlap_and_maximum_span() -> None:
     )
 
 
-def test_build_window_caps_first_run() -> None:
+def test_build_window_caps_first_run_at_thirty_days() -> None:
     now = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
 
     assert build_window(datetime(1970, 1, 1, tzinfo=UTC), now).start == (
-        now - timedelta(hours=1, minutes=5)
+        now - timedelta(days=30, minutes=5)
     )
 
 

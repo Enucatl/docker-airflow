@@ -24,7 +24,7 @@ def build_window(
     *,
     ingestion_delay: timedelta = timedelta(minutes=5),
     overlap: timedelta = timedelta(minutes=10),
-    max_span: timedelta = timedelta(hours=1),
+    max_span: timedelta = timedelta(days=30),
 ) -> LokiWindow:
     """Build an eligible, overlapping, bounded Loki query window."""
 
