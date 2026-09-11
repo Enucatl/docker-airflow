@@ -3,7 +3,7 @@ from __future__ import annotations
 from email.message import EmailMessage
 import html
 import smtplib
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Mapping
 
 import niquests
 
@@ -57,14 +57,30 @@ def notify_failure(
 
 
 def send_email(
-    connection: Connection, *, sender: str, recipient: str, subject: str, body: str
+    connection: Connection,
+    *,
+    sender: str,
+    recipient: str,
+    subject: str,
+    body: str,
+    html_body: str | None = None,
+    text_attachments: Mapping[str, str] | None = None,
 ) -> None:
     message = EmailMessage()
     message["From"] = sender
     message["To"] = recipient
     message["Subject"] = subject
     message.set_content(body)
-    message.add_alternative(f"<pre>{html.escape(body)}</pre>", subtype="html")
+    message.add_alternative(
+        html_body if html_body is not None else f"<pre>{html.escape(body)}</pre>",
+        subtype="html",
+    )
+    for filename, content in (text_attachments or {}).items():
+        message.add_attachment(
+            content,
+            subtype="plain",
+            filename=filename,
+        )
     with smtplib.SMTP(connection.host, connection.port or 587, timeout=60) as smtp:
         smtp.starttls()
         if connection.login:

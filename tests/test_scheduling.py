@@ -20,7 +20,12 @@ def test_timers_are_utc_and_do_not_catch_up() -> None:
     assert "OnCalendar=*-*-01 03:00:00 UTC" in yaml
     assert "OnCalendar=Fri *-*-* 02:00:00 UTC" in yaml
     assert yaml.count("docker compose run --build --rm --no-deps") >= 5
-    assert yaml.count("EnvironmentFile=/opt/docker/.env") >= 5
+    assert (
+        yaml.count(
+            "Environment=COMPOSE_ENV_FILES=/opt/docker/.env,/opt/docker/airflow/.env"
+        )
+        >= 5
+    )
 
 
 def test_exam_has_sufficient_chromium_temporary_space() -> None:

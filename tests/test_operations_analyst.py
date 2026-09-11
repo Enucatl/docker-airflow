@@ -17,6 +17,7 @@ from operations_analyst import (
     codex_prompt,
     fingerprint,
     redact_web_query,
+    render_email_report,
     render_report,
     weekly_slices,
 )
@@ -134,8 +135,14 @@ def test_only_actionable_failures_receive_prompts():
     )
     start = datetime(2026, 1, 1, tzinfo=UTC)
     body = render_report([actionable, noise], start, start + timedelta(days=7), [])
+    rendered = render_email_report(
+        [actionable, noise], start, start + timedelta(days=7), []
+    )
 
-    assert body.count("Do not create a commit.") == 1
+    assert "Do not create a commit." not in body
+    assert rendered.attachments == {}
+    assert "Priority findings:" in rendered.plain_text
+    assert "Weekly Operations Report" in rendered.html
     assert (
         "Representative log lines and surrounding context are retained in Loki"
         in codex_prompt(actionable, start, start + timedelta(days=7))
@@ -164,9 +171,77 @@ def test_unknown_actionable_findings_are_not_rendered_as_diagnoses():
         [],
     )
 
-    assert "Actionable diagnoses:\n- None" in body
+    assert "Priority findings:\n- None" in body
     assert "Unresolved:\n- [new] host / svc: 3" in body
     assert "Do not create a commit." not in body
+
+
+def test_code_configuration_findings_get_one_remediation_attachment_and_html_is_escaped():
+    finding = Finding(
+        "fingerprint",
+        "host<&",
+        "svc",
+        "docker",
+        "error",
+        "boom",
+        4,
+        classification="actionable_failure",
+        severity="high",
+        remediation_kind="configuration",
+        impact="<important>",
+        analysis="config cause",
+        repair_plan="update managed config",
+        verification=["run <check>"],
+    )
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    rendered = render_email_report([finding], start, start + timedelta(days=7), [])
+
+    assert list(rendered.attachments) == [
+        "weekly-operations-remediation-2026-01-08.txt"
+    ]
+    attachment = next(iter(rendered.attachments.values()))
+    assert "Do not create a commit." in attachment
+    assert "<important>" not in rendered.html
+    assert "host&lt;&amp;" in rendered.html
+    assert "<check>" not in rendered.html
+
+
+def test_priority_sort_uses_severity_then_trend_then_fixability():
+    low_new = Finding(
+        "a",
+        "host",
+        "low",
+        "docker",
+        "error",
+        "x",
+        100,
+        classification="actionable_failure",
+        severity="low",
+        remediation_kind="code",
+    )
+    high_recurring = Finding(
+        "b",
+        "host",
+        "high",
+        "docker",
+        "error",
+        "x",
+        1,
+        classification="actionable_failure",
+        severity="high",
+        trend="recurring",
+        remediation_kind="operational",
+    )
+    rendered = render_email_report(
+        [low_new, high_recurring],
+        datetime(2026, 1, 1, tzinfo=UTC),
+        datetime(2026, 1, 8, tzinfo=UTC),
+        [],
+    )
+
+    assert rendered.plain_text.index("host / high") < rendered.plain_text.index(
+        "host / low"
+    )
 
 
 def test_historical_docker_host_fallback(monkeypatch):
@@ -605,6 +680,8 @@ def test_reasoning_and_privacy_parameters_are_stage_specific(monkeypatch):
             },
             {
                 "impact": "low",
+                "severity": "low",
+                "remediation_kind": "unknown",
                 "cause_status": "unknown",
                 "confidence": "low",
                 "analysis": "insufficient evidence",
