@@ -3,15 +3,19 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
+from email.utils import parsedate_to_datetime
+from enum import Enum
 import hashlib
 import json
 import os
 from pathlib import Path
+import random
 import re
 import shutil
 import subprocess
 import logging
 import time
+import traceback
 from typing import Any, Iterable
 
 import niquests
@@ -118,6 +122,345 @@ class Diagnosis(BaseModel):
     repair_plan: str
     affected_repositories: list[str] = Field(default_factory=list)
     verification: list[str] = Field(default_factory=list)
+
+
+class FailureReason(str, Enum):
+    TRUNCATED = "truncated"
+    EMPTY_OR_MALFORMED_RESPONSE = "empty_or_malformed_response"
+    INVALID_JSON = "invalid_json"
+    SCHEMA_VALIDATION_FAILED = "schema_validation_failed"
+    REFUSAL = "refusal"
+    CONTENT_FILTERED = "content_filtered"
+    TRANSIENT_PROVIDER_FAILURE = "transient_provider_failure"
+    UNSUPPORTED_STRUCTURED_OUTPUT = "unsupported_structured_output"
+
+
+class LLMFailure(RuntimeError):
+    """A safe, normalized failure from one logical model invocation."""
+
+    def __init__(
+        self,
+        reason: FailureReason,
+        *,
+        status_code: int | None = None,
+        provider_error_code: str | None = None,
+        request_id: str | None = None,
+        retry_after: float | None = None,
+    ) -> None:
+        super().__init__(reason.value)
+        self.reason = reason
+        self.status_code = status_code
+        self.provider_error_code = provider_error_code
+        self.request_id = request_id
+        self.retry_after = retry_after
+
+    @property
+    def recoverable(self) -> bool:
+        return self.reason not in {
+            FailureReason.UNSUPPORTED_STRUCTURED_OUTPUT,
+        }
+
+
+MAX_LLM_ATTEMPTS = 3
+SUPPORTED_STRUCTURED_OUTPUT_MODES = frozenset({"auto", "json_schema", "prompt_json"})
+SUPPORTED_REASONING_EFFORTS = frozenset(
+    {"none", "minimal", "low", "medium", "high", "xhigh"}
+)
+KNOWN_NULL_CHOICES_MESSAGE = "'NoneType' object is not iterable"
+
+
+def _response_headers(exception: BaseException) -> Any:
+    response = getattr(exception, "response", None)
+    return getattr(response, "headers", None)
+
+
+def _header(headers: Any, name: str) -> str | None:
+    if not headers:
+        return None
+    try:
+        for key, value in headers.items():
+            if str(key).lower() == name.lower():
+                return str(value)
+    except AttributeError:
+        return None
+    return None
+
+
+def _retry_after(exception: BaseException) -> float | None:
+    value = _header(_response_headers(exception), "retry-after")
+    if value is None:
+        return None
+    try:
+        delay = float(value)
+    except ValueError:
+        try:
+            target = parsedate_to_datetime(value)
+            if target.tzinfo is None:
+                target = target.replace(tzinfo=UTC)
+            delay = (target - datetime.now(UTC)).total_seconds()
+        except TypeError, ValueError, OverflowError:
+            return None
+    if delay < 0:
+        return None
+    return min(delay, 60.0)
+
+
+def _request_metadata(
+    exception: BaseException,
+) -> tuple[int | None, str | None, str | None]:
+    status_code = getattr(exception, "status_code", None)
+    if not isinstance(status_code, int):
+        status_code = None
+    provider_error_code = getattr(exception, "code", None)
+    if not isinstance(provider_error_code, str):
+        provider_error_code = None
+    body = getattr(exception, "body", None)
+    body_error = body.get("error") if isinstance(body, dict) else None
+    if provider_error_code is None and isinstance(body_error, dict):
+        body_code = body_error.get("code")
+        if isinstance(body_code, str):
+            provider_error_code = body_code
+    request_id = getattr(exception, "request_id", None)
+    if not isinstance(request_id, str):
+        request_id = _header(_response_headers(exception), "x-request-id")
+    return status_code, provider_error_code, request_id
+
+
+def _has_openai_parser_frame(exception: BaseException) -> bool:
+    for frame in traceback.extract_tb(exception.__traceback__):
+        filename = frame.filename.replace("\\", "/")
+        if frame.name == "parse_chat_completion" and (
+            "openai/lib/_parsing/_completions.py" in filename
+            or filename.endswith("/_parsing/_completions.py")
+        ):
+            return True
+        if frame.name == "_create_chat_result" and filename.endswith(
+            "/langchain_openai/chat_models/base.py"
+        ):
+            return True
+    return False
+
+
+def _is_null_choices_type_error(exception: TypeError) -> bool:
+    message = str(exception)
+    return (
+        message == KNOWN_NULL_CHOICES_MESSAGE
+        or message.startswith("Received response with null value for 'choices'.")
+    ) and _has_openai_parser_frame(exception)
+
+
+def _is_empty_generation_index_error(exception: IndexError) -> bool:
+    if str(exception) != "list index out of range":
+        return False
+    return any(
+        frame.name in {"parse_result", "_create_chat_result"}
+        and (
+            "langchain_core/output_parsers/openai_tools.py"
+            in frame.filename.replace("\\", "/")
+            or "langchain_openai/chat_models/base.py"
+            in frame.filename.replace("\\", "/")
+        )
+        for frame in traceback.extract_tb(exception.__traceback__)
+    )
+
+
+def _unsupported_structured_output(exception: BaseException) -> bool:
+    status_code, provider_error_code, _request_id = _request_metadata(exception)
+    body = getattr(exception, "body", None)
+    body_error = body.get("error") if isinstance(body, dict) else None
+    if isinstance(body_error, dict):
+        provider_error_code = provider_error_code or body_error.get("code")
+    if provider_error_code in {
+        "unsupported_parameter",
+        "response_format_not_supported",
+    }:
+        return True
+    if status_code not in {400, 422}:
+        return False
+    message = str(exception).lower()
+    if isinstance(body_error, dict) and isinstance(body_error.get("message"), str):
+        message += " " + body_error["message"].lower()
+    mentions_format = any(
+        term in message
+        for term in (
+            "response_format",
+            "json schema",
+            "json_schema",
+            "structured output",
+            "structured_output",
+            "require_parameters",
+        )
+    )
+    mentions_unsupported = any(
+        term in message
+        for term in (
+            "unsupported",
+            "not support",
+            "does not support",
+            "no eligible",
+            "required parameter",
+        )
+    )
+    return mentions_format and mentions_unsupported
+
+
+def _normalize_llm_exception(exception: BaseException) -> LLMFailure | None:
+    """Map known provider/parser failures without retaining unsafe error text."""
+    import openai
+    from langchain_core.exceptions import OutputParserException
+    from pydantic import ValidationError
+
+    try:
+        from langchain_openai.chat_models.base import OpenAIRefusalError
+    except ImportError:  # pragma: no cover - compatibility with older LangChain
+        OpenAIRefusalError = ()
+
+    status_code, provider_error_code, request_id = _request_metadata(exception)
+    metadata = {
+        "status_code": status_code,
+        "provider_error_code": provider_error_code,
+        "request_id": request_id,
+    }
+    if isinstance(exception, LLMFailure):
+        return exception
+    if isinstance(exception, openai.LengthFinishReasonError):
+        return LLMFailure(FailureReason.TRUNCATED, **metadata)
+    if isinstance(exception, openai.ContentFilterFinishReasonError):
+        return LLMFailure(FailureReason.CONTENT_FILTERED, **metadata)
+    if OpenAIRefusalError and isinstance(exception, OpenAIRefusalError):
+        return LLMFailure(FailureReason.REFUSAL, **metadata)
+    if isinstance(exception, ValidationError):
+        return LLMFailure(FailureReason.SCHEMA_VALIDATION_FAILED, **metadata)
+    if isinstance(exception, json.JSONDecodeError):
+        return LLMFailure(FailureReason.INVALID_JSON, **metadata)
+    if isinstance(exception, OutputParserException):
+        parser_message = str(exception).lower()
+        reason = (
+            FailureReason.INVALID_JSON
+            if "json" in parser_message
+            else FailureReason.EMPTY_OR_MALFORMED_RESPONSE
+        )
+        return LLMFailure(reason, **metadata)
+    if isinstance(exception, TypeError) and _is_null_choices_type_error(exception):
+        return LLMFailure(FailureReason.EMPTY_OR_MALFORMED_RESPONSE, **metadata)
+    if isinstance(exception, IndexError) and _is_empty_generation_index_error(
+        exception
+    ):
+        return LLMFailure(FailureReason.EMPTY_OR_MALFORMED_RESPONSE, **metadata)
+    if isinstance(exception, openai.APIResponseValidationError):
+        return LLMFailure(FailureReason.EMPTY_OR_MALFORMED_RESPONSE, **metadata)
+    if isinstance(exception, ValueError) and str(exception).startswith(
+        "Structured Output response does not have a 'parsed' field nor a 'refusal' field."
+    ):
+        return LLMFailure(FailureReason.EMPTY_OR_MALFORMED_RESPONSE, **metadata)
+    if _unsupported_structured_output(exception):
+        return LLMFailure(FailureReason.UNSUPPORTED_STRUCTURED_OUTPUT, **metadata)
+    if isinstance(
+        exception, (openai.AuthenticationError, openai.PermissionDeniedError)
+    ):
+        return None
+    if isinstance(exception, openai.APIStatusError):
+        if status_code in {408, 409, 429} or (
+            status_code is not None and status_code >= 500
+        ):
+            return LLMFailure(
+                FailureReason.TRANSIENT_PROVIDER_FAILURE,
+                retry_after=_retry_after(exception),
+                **metadata,
+            )
+        return None
+    if isinstance(
+        exception, (openai.APIConnectionError, TimeoutError, ConnectionError)
+    ):
+        return LLMFailure(
+            FailureReason.TRANSIENT_PROVIDER_FAILURE,
+            retry_after=_retry_after(exception),
+            **metadata,
+        )
+    return None
+
+
+def _model_text(result: Any) -> str:
+    content = getattr(result, "content", result)
+    if isinstance(content, dict) and isinstance(content.get("content"), str):
+        content = content["content"]
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                value = block.get("text")
+                if isinstance(value, str):
+                    parts.append(value)
+                elif isinstance(value, dict) and isinstance(value.get("value"), str):
+                    parts.append(value["value"])
+        return "".join(parts).strip()
+    return ""
+
+
+def _result_refusal(result: Any) -> bool:
+    additional_kwargs = getattr(result, "additional_kwargs", {})
+    if isinstance(additional_kwargs, dict) and additional_kwargs.get("refusal"):
+        return True
+    content_blocks = getattr(result, "content_blocks", [])
+    return any(
+        isinstance(block, dict)
+        and block.get("type") == "refusal"
+        and block.get("refusal")
+        for block in content_blocks
+    )
+
+
+def _validate_model_result(
+    result: Any, schema: type[BaseModel], mode: str
+) -> BaseModel:
+    if mode == "prompt_json":
+        if _result_refusal(result):
+            raise LLMFailure(FailureReason.REFUSAL)
+        content = _model_text(result)
+        if not content:
+            raise LLMFailure(FailureReason.EMPTY_OR_MALFORMED_RESPONSE)
+        payload = json.loads(content)
+        return schema.model_validate(payload)
+
+    if result is None:
+        raise LLMFailure(FailureReason.EMPTY_OR_MALFORMED_RESPONSE)
+    if _result_refusal(result):
+        raise LLMFailure(FailureReason.REFUSAL)
+    parsed = (
+        getattr(result, "additional_kwargs", {}).get("parsed")
+        if hasattr(result, "additional_kwargs")
+        else None
+    )
+    if parsed is not None:
+        result = parsed
+    elif not isinstance(result, (BaseModel, dict)):
+        raise LLMFailure(FailureReason.EMPTY_OR_MALFORMED_RESPONSE)
+    return schema.model_validate(result)
+
+
+def _retry_delay(failure: LLMFailure, attempt: int) -> float:
+    if failure.retry_after is not None:
+        return min(failure.retry_after, 60.0)
+    return min(30.0, (2 ** (attempt - 1)) + random.uniform(0.0, 1.0))
+
+
+FAILURE_PHRASES = {
+    FailureReason.TRUNCATED: "output truncated",
+    FailureReason.EMPTY_OR_MALFORMED_RESPONSE: "empty or malformed provider response",
+    FailureReason.INVALID_JSON: "invalid model JSON/schema output",
+    FailureReason.SCHEMA_VALIDATION_FAILED: "invalid model JSON/schema output",
+    FailureReason.REFUSAL: "request refused or content filtered",
+    FailureReason.CONTENT_FILTERED: "request refused or content filtered",
+    FailureReason.TRANSIENT_PROVIDER_FAILURE: "provider unavailable after retries",
+}
+
+
+def _failure_phrase(failure: LLMFailure) -> str:
+    return FAILURE_PHRASES.get(failure.reason, "model analysis unavailable")
 
 
 def fingerprint_copy(line: str) -> str:
@@ -399,8 +742,8 @@ def web_search(
             {"title": row.get("title", ""), "url": row.get("url", "")}
             for row in response.json().get("results", [])
         ], None
-    except Exception as exc:
-        return [], f"Web research unavailable: {exc}"
+    except Exception:
+        return [], "Web research unavailable"
 
 
 def analyze_findings(
@@ -409,7 +752,6 @@ def analyze_findings(
     corpus: RepositoryCorpus,
 ) -> tuple[list[Finding], list[str]]:
     """Triage in one batch, then let the model request confined public evidence."""
-    from openai import LengthFinishReasonError
     from langchain_openai import ChatOpenAI
 
     if endpoint := os.getenv("PHOENIX_COLLECTOR_ENDPOINT"):
@@ -422,45 +764,134 @@ def analyze_findings(
         )
 
     connection = vault.get("operations_analyst_openrouter")
-    model_name = str(connection.extra.get("model", DEFAULT_MODEL))
-    llm = ChatOpenAI(
-        model=model_name,
-        api_key=connection.password,
-        base_url=connection.host,
-        temperature=0,
-        timeout=300,
-        max_retries=0,
-        max_completion_tokens=ANALYSIS_MAX_COMPLETION_TOKENS,
-        reasoning_effort="low",
-    )
-    triage_llm = ChatOpenAI(
-        model=model_name,
-        api_key=connection.password,
-        base_url=connection.host,
-        temperature=0,
-        timeout=300,
-        max_retries=0,
-        max_completion_tokens=TRIAGE_MAX_COMPLETION_TOKENS,
-        extra_body={"reasoning": {"effort": "none"}},
-    )
+    extra = connection.extra
+    if not isinstance(extra, dict):
+        raise ValueError("operations analyst OpenRouter extra must be a JSON object")
+    configured_mode = str(extra.get("structured_output_mode", "auto"))
+    if configured_mode not in SUPPORTED_STRUCTURED_OUTPUT_MODES:
+        raise ValueError(
+            "structured_output_mode must be auto, json_schema, or prompt_json"
+        )
+    zdr = extra.get("zdr", False)
+    if not isinstance(zdr, bool):
+        raise ValueError("OpenRouter zdr must be a boolean")
+    triage_reasoning_effort = extra.get("triage_reasoning_effort")
+    if triage_reasoning_effort is not None and (
+        not isinstance(triage_reasoning_effort, str)
+        or triage_reasoning_effort not in SUPPORTED_REASONING_EFFORTS
+    ):
+        raise ValueError("triage_reasoning_effort is not supported by OpenRouter")
+    model_name = str(extra.get("model", DEFAULT_MODEL))
     logger = logging.getLogger(__name__)
+    clients: dict[tuple[str, str], Any] = {}
+
+    def client_for(mode: str, stage: str) -> Any:
+        key = (mode, stage)
+        if key in clients:
+            return clients[key]
+        is_triage = stage.startswith("triage_batch")
+        provider = {"data_collection": "deny"}
+        if mode == "json_schema":
+            provider["require_parameters"] = True
+        if zdr:
+            provider["zdr"] = True
+        extra_body: dict[str, Any] = {"provider": provider}
+        effort = triage_reasoning_effort if is_triage else "low"
+        if effort is not None:
+            extra_body["reasoning"] = {"effort": effort}
+        clients[key] = ChatOpenAI(
+            model=model_name,
+            api_key=connection.password,
+            base_url=connection.host,
+            temperature=0,
+            timeout=300,
+            max_retries=0,
+            max_completion_tokens=(
+                TRIAGE_MAX_COMPLETION_TOKENS
+                if is_triage
+                else ANALYSIS_MAX_COMPLETION_TOKENS
+            ),
+            extra_body=extra_body,
+        )
+        return clients[key]
 
     def invoke_structured(
-        schema: type[BaseModel], prompt: str, stage: str, client: ChatOpenAI = llm
+        schema: type[BaseModel], prompt: str, stage: str
     ) -> BaseModel:
-        started = time.monotonic()
-        logger.info(
-            "Starting OpenRouter request stage=%s model=%s",
-            stage,
-            model_name,
+        initial_mode = (
+            "prompt_json" if configured_mode == "prompt_json" else "json_schema"
         )
-        result = client.with_structured_output(schema).invoke(prompt)
-        logger.info(
-            "Completed OpenRouter request stage=%s duration_seconds=%.2f",
-            stage,
-            time.monotonic() - started,
-        )
-        return result
+        mode = initial_mode
+        fallback_available = configured_mode == "auto"
+        while True:
+            client = client_for(mode, stage)
+            for attempt in range(1, MAX_LLM_ATTEMPTS + 1):
+                started = time.monotonic()
+                logger.info(
+                    "Starting OpenRouter request stage=%s model=%s structured_output_mode=%s attempt=%s",
+                    stage,
+                    model_name,
+                    mode,
+                    attempt,
+                )
+                try:
+                    if mode == "json_schema":
+                        raw_result = client.with_structured_output(
+                            schema, method="json_schema", strict=True
+                        ).invoke(prompt)
+                    else:
+                        schema_json = json.dumps(
+                            schema.model_json_schema(), sort_keys=True
+                        )
+                        compatibility_prompt = (
+                            prompt
+                            + "\n\nReturn exactly one JSON object matching this JSON Schema. "
+                            "Do not use a Markdown fence or add commentary. JSON Schema:\n"
+                            + schema_json
+                        )
+                        raw_result = client.invoke(compatibility_prompt)
+                    result = _validate_model_result(raw_result, schema, mode)
+                except Exception as exception:
+                    failure = _normalize_llm_exception(exception)
+                    if failure is None:
+                        raise
+                    elapsed = time.monotonic() - started
+                    logger.warning(
+                        "OpenRouter model attempt failed stage=%s model=%s structured_output_mode=%s reason=%s attempt=%s max_attempts=%s elapsed_seconds=%.2f http_status=%s provider_error_code=%s request_id=%s",
+                        stage,
+                        model_name,
+                        mode,
+                        failure.reason.value,
+                        attempt,
+                        MAX_LLM_ATTEMPTS,
+                        elapsed,
+                        failure.status_code,
+                        failure.provider_error_code,
+                        failure.request_id,
+                    )
+                    if (
+                        failure.reason == FailureReason.UNSUPPORTED_STRUCTURED_OUTPUT
+                        and fallback_available
+                        and mode == "json_schema"
+                    ):
+                        mode = "prompt_json"
+                        fallback_available = False
+                        break
+                    if (
+                        failure.reason == FailureReason.TRANSIENT_PROVIDER_FAILURE
+                        and attempt < MAX_LLM_ATTEMPTS
+                    ):
+                        time.sleep(_retry_delay(failure, attempt))
+                        continue
+                    raise failure from exception
+                logger.info(
+                    "Completed OpenRouter request stage=%s model=%s structured_output_mode=%s duration_seconds=%.2f",
+                    stage,
+                    model_name,
+                    mode,
+                    time.monotonic() - started,
+                )
+                return result
 
     by_fingerprint = {item.fingerprint: item for item in findings}
     triage_candidates = [item for item in findings if item.count][:MAX_TRIAGE_FINDINGS]
@@ -495,17 +926,55 @@ def analyze_findings(
                 TriageBatch,
                 triage_prompt + json.dumps(compact),
                 f"triage_batch_{offset // TRIAGE_BATCH_SIZE + 1}",
-                triage_llm,
             )
-        except LengthFinishReasonError:
+        except LLMFailure as failure:
+            if not failure.recoverable:
+                raise
             batch_number = offset // TRIAGE_BATCH_SIZE + 1
+            for item in triage_candidates[offset : offset + TRIAGE_BATCH_SIZE]:
+                item.classification = "unclear"
+            warning = (
+                f"Triage batch {batch_number}: {_failure_phrase(failure)}; "
+                "affected findings remain unresolved"
+            )
             logger.warning(
-                "OpenRouter truncated triage batch %s; retaining its findings as unresolved",
-                batch_number,
+                "OpenRouter downgraded stage=%s reason=%s affected_findings=%s",
+                f"triage_batch_{batch_number}",
+                failure.reason.value,
+                len(triage_candidates[offset : offset + TRIAGE_BATCH_SIZE]),
             )
-            warnings.append(
-                f"Triage batch {batch_number} was truncated by the model and remains unresolved"
+            warnings.append(warning)
+            continue
+        expected = [
+            item.fingerprint
+            for item in triage_candidates[offset : offset + TRIAGE_BATCH_SIZE]
+        ]
+        returned = [decision.fingerprint for decision in batch.decisions]
+        counts = Counter(returned)
+        missing = len(set(expected) - set(returned))
+        duplicated = sum(max(count - 1, 0) for count in counts.values())
+        unexpected = sum(
+            1
+            for fingerprint_value in returned
+            if fingerprint_value not in set(expected)
+        )
+        if missing or duplicated or unexpected:
+            for item in triage_candidates[offset : offset + TRIAGE_BATCH_SIZE]:
+                item.classification = "unclear"
+            batch_number = offset // TRIAGE_BATCH_SIZE + 1
+            warning = (
+                f"Triage batch {batch_number} returned invalid decision cardinality "
+                f"(missing={missing}, duplicated={duplicated}, unexpected={unexpected}); "
+                "affected findings remain unresolved"
             )
+            logger.warning(
+                "OpenRouter rejected triage cardinality stage=%s missing=%s duplicated=%s unexpected=%s",
+                f"triage_batch_{batch_number}",
+                missing,
+                duplicated,
+                unexpected,
+            )
+            warnings.append(warning)
             continue
         for decision in batch.decisions:
             if finding := by_fingerprint.get(decision.fingerprint):
@@ -540,9 +1009,9 @@ def analyze_findings(
         )
         try:
             add_log_context(finding)
-        except Exception as exc:
+        except Exception:
             warnings.append(
-                f"Surrounding log context unavailable for {finding.host}/{finding.service}: {exc}"
+                f"Surrounding log context unavailable for {finding.host}/{finding.service}"
             )
         finding_for_model = asdict(finding)
         finding_for_model["template"] = finding.template[:MAX_MODEL_TEXT]
@@ -572,13 +1041,18 @@ def analyze_findings(
                 ),
                 "research_plan",
             )
-        except LengthFinishReasonError:
+        except LLMFailure as failure:
+            if not failure.recoverable:
+                raise
             finding.classification = "unclear"
             warning = (
-                f"Deep research plan for {finding.host}/{finding.service} was truncated by the model; "
-                "the finding remains unresolved"
+                f"Deep research plan for {finding.host}/{finding.service}: "
+                f"{_failure_phrase(failure)}; the finding remains unresolved"
             )
-            logger.warning(warning)
+            logger.warning(
+                "OpenRouter downgraded stage=research_plan reason=%s affected_findings=1",
+                failure.reason.value,
+            )
             warnings.append(warning)
             continue
         from common.loki import query_loki_range
@@ -611,8 +1085,8 @@ def analyze_findings(
                         ],
                     }
                 )
-            except Exception as exc:
-                warnings.append(f"Additional Loki query unavailable: {exc}")
+            except Exception:
+                warnings.append("Additional Loki query unavailable")
         for request in plan.repository_files:
             try:
                 name, relative = request.split(":", 1)
@@ -627,8 +1101,8 @@ def analyze_findings(
                 evidence_payload.setdefault("repository_files", []).append(
                     bounded_record
                 )
-            except (OSError, ValueError, subprocess.CalledProcessError) as exc:
-                warnings.append(f"Repository evidence unavailable for {request}: {exc}")
+            except OSError, ValueError, subprocess.CalledProcessError:
+                warnings.append(f"Repository evidence unavailable for {request}")
         for request in plan.repository_searches:
             try:
                 name, pattern = request.split(":", 1)
@@ -641,8 +1115,8 @@ def analyze_findings(
                         "matches": matches,
                     }
                 )
-            except (OSError, ValueError, subprocess.CalledProcessError) as exc:
-                warnings.append(f"Repository search unavailable for {request}: {exc}")
+            except OSError, ValueError, subprocess.CalledProcessError:
+                warnings.append(f"Repository search unavailable for {request}")
         for query in plan.web_queries:
             sources, warning = web_search(vault, query)
             finding.web_sources.extend(sources)
@@ -659,13 +1133,18 @@ def analyze_findings(
                 ),
                 "diagnosis",
             )
-        except LengthFinishReasonError:
+        except LLMFailure as failure:
+            if not failure.recoverable:
+                raise
             finding.classification = "unclear"
             warning = (
-                f"Diagnosis for {finding.host}/{finding.service} was truncated by the model; "
-                "the finding remains unresolved"
+                f"Diagnosis for {finding.host}/{finding.service}: "
+                f"{_failure_phrase(failure)}; the finding remains unresolved"
             )
-            logger.warning(warning)
+            logger.warning(
+                "OpenRouter downgraded stage=diagnosis reason=%s affected_findings=1",
+                failure.reason.value,
+            )
             warnings.append(warning)
             continue
         for key, value in diagnosis.model_dump().items():

@@ -1,19 +1,67 @@
 from datetime import UTC, datetime, timedelta
+import json
 import subprocess
 
+import httpx
 import pytest
+from langchain_core.messages import AIMessage
+import langchain_openai
+import openai
 
 from operations_analyst import (
     CONTROL_PLANE_GUIDANCE,
     Evidence,
     Finding,
     RepositoryCorpus,
+    analyze_findings,
     codex_prompt,
     fingerprint,
     redact_web_query,
     render_report,
     weekly_slices,
 )
+
+
+def _connection(extra=None):
+    class Connection:
+        host = "https://openrouter.ai/api/v1"
+        password = "test-key"
+
+    Connection.extra = {"model": "test-model", **(extra or {})}
+
+    return Connection()
+
+
+class _Vault:
+    def __init__(self, connection=None):
+        self.connection = connection or _connection()
+
+    def get(self, _name):
+        return self.connection
+
+
+def _install_fake_chat(monkeypatch, outcomes, captured=None):
+    class Client:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.outcomes = outcomes
+            if captured is not None:
+                captured.append(self)
+
+        def with_structured_output(self, schema, **kwargs):
+            self.structured_schema = schema
+            self.structured_kwargs = kwargs
+            return self
+
+        def invoke(self, prompt):
+            self.prompt = prompt
+            outcome = self.outcomes.pop(0)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return outcome
+
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", Client)
+    return Client
 
 
 def test_fingerprint_masks_dynamic_values_without_mutating_evidence():
@@ -154,3 +202,582 @@ def test_triage_limits_are_conservative():
     assert TRIAGE_BATCH_SIZE <= 25
     assert MAX_MODEL_TEXT <= 1200
     assert MAX_REPOSITORY_TEXT <= 12000
+
+
+def test_malformed_structured_response_keeps_triage_unresolved(monkeypatch):
+    captured = []
+    namespace = {}
+    exec(
+        compile(
+            "def parse_chat_completion():\n"
+            "    raise TypeError(\"'NoneType' object is not iterable\")\n",
+            "/opt/test/.venv/lib/python3.14/site-packages/openai/lib/_parsing/_completions.py",
+            "exec",
+        ),
+        namespace,
+    )
+
+    class FailingClient:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            captured.append(self)
+
+        def with_structured_output(self, _schema, **_kwargs):
+            return self
+
+        def invoke(self, _prompt):
+            namespace["parse_chat_completion"]()
+
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", FailingClient)
+    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
+
+    analyzed, warnings = analyze_findings(_Vault(), [finding], None)
+
+    assert analyzed[0].classification == "unclear"
+    assert warnings == [
+        "Triage batch 1: empty or malformed provider response; affected findings remain unresolved"
+    ]
+    assert captured[0].kwargs["extra_body"]["provider"] == {
+        "data_collection": "deny",
+        "require_parameters": True,
+    }
+
+
+def test_unrelated_type_error_propagates(monkeypatch):
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        def with_structured_output(self, _schema, **_kwargs):
+            return self
+
+        def invoke(self, _prompt):
+            raise TypeError("'NoneType' object is not iterable")
+
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", Client)
+    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
+
+    with pytest.raises(TypeError, match="NoneType"):
+        analyze_findings(_Vault(), [finding], None)
+
+
+def test_native_structured_output_uses_schema_method_and_validates(monkeypatch):
+    captured = []
+    _install_fake_chat(
+        monkeypatch,
+        [
+            {
+                "decisions": [
+                    {"fingerprint": "fingerprint", "classification": "expected_noise"}
+                ]
+            }
+        ],
+        captured,
+    )
+    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
+
+    analyzed, warnings = analyze_findings(_Vault(), [finding], None)
+
+    assert not warnings
+    assert analyzed[0].classification == "expected_noise"
+    assert captured[0].structured_kwargs == {"method": "json_schema", "strict": True}
+    assert captured[0].kwargs["extra_body"] == {
+        "provider": {"data_collection": "deny", "require_parameters": True}
+    }
+
+
+def test_prompt_json_mode_supports_deepseek_without_native_structured_output(
+    monkeypatch,
+):
+    captured = []
+    _install_fake_chat(
+        monkeypatch,
+        [
+            AIMessage(
+                content=json.dumps(
+                    {
+                        "decisions": [
+                            {
+                                "fingerprint": "fingerprint",
+                                "classification": "expected_noise",
+                            }
+                        ]
+                    }
+                )
+            )
+        ],
+        captured,
+    )
+    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
+
+    analyzed, warnings = analyze_findings(
+        _Vault(
+            _connection(
+                {
+                    "model": "deepseek/deepseek-v4.1-flash",
+                    "structured_output_mode": "prompt_json",
+                }
+            )
+        ),
+        [finding],
+        None,
+    )
+
+    assert not warnings
+    assert analyzed[0].classification == "expected_noise"
+    assert not hasattr(captured[0], "structured_kwargs")
+    assert "JSON Schema" in captured[0].prompt
+    assert captured[0].kwargs["extra_body"] == {"provider": {"data_collection": "deny"}}
+
+
+def test_auto_falls_back_once_for_unsupported_native_output(monkeypatch):
+    captured = []
+
+    class Unsupported(Exception):
+        status_code = 400
+        code = "unsupported_parameter"
+
+    class Client:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            captured.append(self)
+
+        def with_structured_output(self, _schema, **_kwargs):
+            return self
+
+        def invoke(self, _prompt):
+            if self.kwargs["extra_body"]["provider"].get("require_parameters"):
+                raise Unsupported("response_format is unsupported by the provider")
+            return AIMessage(
+                content=json.dumps(
+                    {
+                        "decisions": [
+                            {
+                                "fingerprint": "fingerprint",
+                                "classification": "expected_noise",
+                            }
+                        ]
+                    }
+                )
+            )
+
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", Client)
+    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
+
+    analyzed, warnings = analyze_findings(_Vault(), [finding], None)
+
+    assert not warnings
+    assert analyzed[0].classification == "expected_noise"
+    assert len(captured) == 2
+    assert captured[1].kwargs["extra_body"]["provider"] == {"data_collection": "deny"}
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_authentication_and_authorization_failures_escape(monkeypatch, status):
+    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    response = httpx.Response(status, request=request)
+    error_class = (
+        openai.AuthenticationError if status == 401 else openai.PermissionDeniedError
+    )
+    error = error_class(
+        "secret response body", response=response, body={"secret": "body"}
+    )
+
+    _install_fake_chat(monkeypatch, [error])
+    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
+
+    with pytest.raises(error_class):
+        analyze_findings(_Vault(), [finding], None)
+
+
+def test_retries_timeout_then_succeeds(monkeypatch):
+    calls = []
+    _install_fake_chat(
+        monkeypatch,
+        [
+            openai.APITimeoutError(
+                httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+            ),
+            {
+                "decisions": [
+                    {"fingerprint": "fingerprint", "classification": "expected_noise"}
+                ]
+            },
+        ],
+        calls,
+    )
+    sleeps = []
+    monkeypatch.setattr("operations_analyst.time.sleep", sleeps.append)
+    monkeypatch.setattr("operations_analyst.random.uniform", lambda _a, _b: 0.0)
+    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
+
+    analyzed, warnings = analyze_findings(_Vault(), [finding], None)
+
+    assert not warnings
+    assert analyzed[0].classification == "expected_noise"
+    assert sleeps == [1.0]
+
+
+def test_retry_after_is_parsed_and_capped(monkeypatch):
+    import operations_analyst as analyst
+
+    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
+    response = httpx.Response(429, request=request, headers={"Retry-After": "120"})
+    error = openai.RateLimitError("provider unavailable", response=response, body={})
+    failure = analyst._normalize_llm_exception(error)
+
+    assert failure is not None
+    assert analyst._retry_delay(failure, 1) == 60.0
+
+    invalid_response = httpx.Response(
+        429, request=request, headers={"Retry-After": "invalid"}
+    )
+    invalid_error = openai.RateLimitError(
+        "provider unavailable", response=invalid_response, body={}
+    )
+    invalid_failure = analyst._normalize_llm_exception(invalid_error)
+    monkeypatch.setattr("operations_analyst.random.uniform", lambda _a, _b: 0.0)
+
+    assert invalid_failure is not None
+    assert invalid_failure.retry_after is None
+    assert analyst._retry_delay(invalid_failure, 1) == 1.0
+
+
+def test_rate_limit_exhaustion_is_unresolved_and_reason_specific(monkeypatch, caplog):
+    request_url = "https://openrouter.ai/api/v1/chat/completions"
+    errors = []
+    for _ in range(3):
+        request = httpx.Request("POST", request_url)
+        response = httpx.Response(429, request=request, headers={"Retry-After": "5"})
+        errors.append(
+            openai.RateLimitError(
+                "secret response body", response=response, body={"secret": "body"}
+            )
+        )
+    calls = []
+    _install_fake_chat(monkeypatch, errors, calls)
+    sleeps = []
+    monkeypatch.setattr("operations_analyst.time.sleep", sleeps.append)
+    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
+
+    analyzed, warnings = analyze_findings(_Vault(), [finding], None)
+
+    assert analyzed[0].classification == "unclear"
+    assert warnings == [
+        "Triage batch 1: provider unavailable after retries; affected findings remain unresolved"
+    ]
+    assert sleeps == [5.0, 5.0]
+    assert all("secret" not in record.getMessage() for record in caplog.records)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        AIMessage(content=""),
+        AIMessage(content="not json"),
+        AIMessage(content=json.dumps({"wrong": []})),
+        AIMessage(content="refused", additional_kwargs={"refusal": "secret refusal"}),
+    ],
+)
+def test_prompt_json_failures_are_unresolved(monkeypatch, payload):
+    _install_fake_chat(monkeypatch, [payload])
+    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
+
+    analyzed, warnings = analyze_findings(
+        _Vault(_connection({"structured_output_mode": "prompt_json"})),
+        [finding],
+        None,
+    )
+
+    assert analyzed[0].classification == "unclear"
+    assert warnings[0].startswith("Triage batch 1: ")
+    assert "secret" not in warnings[0]
+
+
+@pytest.mark.parametrize(
+    ("decisions", "expected"),
+    [
+        ([{"fingerprint": "fingerprint", "classification": "expected_noise"}], None),
+        ([], "missing=1, duplicated=0, unexpected=0"),
+        (
+            [{"fingerprint": "fingerprint", "classification": "expected_noise"}] * 2,
+            "missing=0, duplicated=1, unexpected=0",
+        ),
+        (
+            [{"fingerprint": "other", "classification": "expected_noise"}],
+            "missing=1, duplicated=0, unexpected=1",
+        ),
+    ],
+)
+def test_triage_response_cardinality_is_all_or_nothing(
+    monkeypatch, decisions, expected
+):
+    _install_fake_chat(monkeypatch, [{"decisions": decisions}])
+    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
+
+    analyzed, warnings = analyze_findings(_Vault(), [finding], None)
+
+    if expected is None:
+        assert analyzed[0].classification == "expected_noise"
+        assert not warnings
+    else:
+        assert analyzed[0].classification == "unclear"
+        assert expected in warnings[0]
+        assert "fingerprint" not in warnings[0]
+
+
+def test_reasoning_and_privacy_parameters_are_stage_specific(monkeypatch):
+    captured = []
+    _install_fake_chat(
+        monkeypatch,
+        [
+            {
+                "decisions": [
+                    {
+                        "fingerprint": "fingerprint",
+                        "classification": "actionable_failure",
+                    }
+                ]
+            },
+            {
+                "additional_log_queries": [],
+                "repository_files": [],
+                "repository_searches": [],
+                "web_queries": [],
+            },
+            {
+                "impact": "low",
+                "cause_status": "unknown",
+                "confidence": "low",
+                "analysis": "insufficient evidence",
+                "repair_plan": "collect more evidence",
+            },
+        ],
+        captured,
+    )
+    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
+
+    class Corpus:
+        def list_repositories(self):
+            return []
+
+    analyze_findings(
+        _Vault(_connection({"zdr": True, "triage_reasoning_effort": "low"})),
+        [finding],
+        Corpus(),
+    )
+
+    assert captured[0].kwargs["extra_body"] == {
+        "provider": {
+            "data_collection": "deny",
+            "require_parameters": True,
+            "zdr": True,
+        },
+        "reasoning": {"effort": "low"},
+    }
+    assert captured[1].kwargs["extra_body"] == {
+        "provider": {
+            "data_collection": "deny",
+            "require_parameters": True,
+            "zdr": True,
+        },
+        "reasoning": {"effort": "low"},
+    }
+
+
+def test_real_chat_openai_request_handles_choices_null_without_leaking_secrets(
+    monkeypatch, caplog
+):
+    requests = []
+
+    def transport(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "id": "completion-id",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "test-model",
+                "choices": None,
+                "usage": {
+                    "prompt_tokens": 1,
+                    "completion_tokens": 1,
+                    "total_tokens": 2,
+                },
+            },
+        )
+
+    real_chat_openai = langchain_openai.ChatOpenAI
+
+    def chat_openai_with_mock_transport(**kwargs):
+        kwargs["http_client"] = httpx.Client(transport=httpx.MockTransport(transport))
+        return real_chat_openai(**kwargs)
+
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", chat_openai_with_mock_transport)
+    finding = Finding(
+        "fingerprint",
+        "host",
+        "service",
+        "job",
+        "error",
+        "failure",
+        1,
+        evidence=[Evidence("2026-01-01T00:00:00+00:00", "private log evidence")],
+    )
+
+    analyzed, warnings = analyze_findings(
+        _Vault(_connection({"structured_output_mode": "json_schema"})),
+        [finding],
+        None,
+    )
+
+    assert analyzed[0].classification == "unclear"
+    assert warnings == [
+        "Triage batch 1: empty or malformed provider response; affected findings remain unresolved"
+    ]
+    assert len(requests) == 1
+    assert requests[0]["provider"] == {
+        "data_collection": "deny",
+        "require_parameters": True,
+    }
+    assert requests[0]["response_format"]["type"] == "json_schema"
+    assert requests[0]["model"] == "test-model"
+    assert requests[0]["max_completion_tokens"] == 10000
+    assert "reasoning_effort" not in requests[0]
+    failure_log = next(
+        record.getMessage()
+        for record in caplog.records
+        if "model attempt failed" in record.getMessage()
+    )
+    assert "stage=triage_batch_1" in failure_log
+    assert "structured_output_mode=json_schema" in failure_log
+    assert "reason=empty_or_malformed_response" in failure_log
+    assert "attempt=1" in failure_log
+    assert "max_attempts=3" in failure_log
+    assert "elapsed_seconds=" in failure_log
+    assert all(
+        token not in record.getMessage()
+        for record in caplog.records
+        for token in ("test-key", "private log evidence")
+    )
+
+
+def test_real_prompt_json_request_omits_native_structured_parameters(monkeypatch):
+    requests = []
+
+    def transport(request):
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "id": "completion-id",
+                "object": "chat.completion",
+                "created": 1,
+                "model": "deepseek/deepseek-v4.1-flash",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": json.dumps(
+                                {
+                                    "decisions": [
+                                        {
+                                            "fingerprint": "fingerprint",
+                                            "classification": "expected_noise",
+                                        }
+                                    ]
+                                }
+                            ),
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        )
+
+    real_chat_openai = langchain_openai.ChatOpenAI
+
+    def chat_openai_with_mock_transport(**kwargs):
+        kwargs["http_client"] = httpx.Client(transport=httpx.MockTransport(transport))
+        return real_chat_openai(**kwargs)
+
+    monkeypatch.setattr(langchain_openai, "ChatOpenAI", chat_openai_with_mock_transport)
+    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
+
+    analyzed, warnings = analyze_findings(
+        _Vault(
+            _connection(
+                {
+                    "model": "deepseek/deepseek-v4.1-flash",
+                    "structured_output_mode": "prompt_json",
+                }
+            )
+        ),
+        [finding],
+        None,
+    )
+
+    assert not warnings
+    assert analyzed[0].classification == "expected_noise"
+    assert requests[0]["provider"] == {"data_collection": "deny"}
+    assert "response_format" not in requests[0]
+    assert "reasoning_effort" not in requests[0]
+    assert "reasoning" not in requests[0]
+
+
+@pytest.mark.parametrize(
+    ("failed_stage", "expected_phrase"),
+    [
+        ("research_plan", "Deep research plan for host/service: output truncated"),
+        ("diagnosis", "Diagnosis for host/service: output truncated"),
+    ],
+)
+def test_research_and_diagnosis_failures_remain_unresolved(
+    monkeypatch, failed_stage, expected_phrase
+):
+    if failed_stage == "research_plan":
+        outcomes = [
+            {
+                "decisions": [
+                    {
+                        "fingerprint": "fingerprint",
+                        "classification": "actionable_failure",
+                    }
+                ]
+            },
+            openai.LengthFinishReasonError.__new__(openai.LengthFinishReasonError),
+        ]
+        outcomes[1].completion = None
+    else:
+        outcomes = [
+            {
+                "decisions": [
+                    {
+                        "fingerprint": "fingerprint",
+                        "classification": "actionable_failure",
+                    }
+                ]
+            },
+            {
+                "additional_log_queries": [],
+                "repository_files": [],
+                "repository_searches": [],
+                "web_queries": [],
+            },
+            openai.LengthFinishReasonError.__new__(openai.LengthFinishReasonError),
+        ]
+        outcomes[-1].completion = None
+    _install_fake_chat(monkeypatch, outcomes)
+    monkeypatch.setattr("operations_analyst.add_log_context", lambda _finding: None)
+
+    class Corpus:
+        def list_repositories(self):
+            return []
+
+    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
+    analyzed, warnings = analyze_findings(_Vault(), [finding], Corpus())
+
+    assert analyzed[0].classification == "unclear"
+    assert warnings[0].startswith(expected_phrase)
