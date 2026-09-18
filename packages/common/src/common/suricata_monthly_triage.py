@@ -7,7 +7,6 @@ from ipaddress import ip_address
 from typing import Any, Callable
 
 
-Decision = str
 Verdict = str
 
 
@@ -125,18 +124,6 @@ def compact_signature_groups(
     ]
 
 
-def build_signature_summary_for_llm(signature_group: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "signature": signature_group["signature"],
-        "alert_count": signature_group["alert_count"],
-        "categories": signature_group["categories"],
-        "signature_ids": signature_group["signature_ids"],
-        "representative_categories": signature_group["representative_categories"],
-        "first_seen": signature_group["first_seen"],
-        "last_seen": signature_group["last_seen"],
-    }
-
-
 def extract_ipv4_identity(
     ip: str,
     dhcp_rows: list[dict[str, Any]],
@@ -200,56 +187,6 @@ def extract_ipv6_identity(
     return identity
 
 
-def build_suppression_candidates(
-    signature_group: dict[str, Any],
-) -> list[dict[str, Any]]:
-    candidates: list[dict[str, Any]] = []
-    for signature_id in signature_group["signature_ids"]:
-        candidates.append(
-            {
-                "signature_id": signature_id,
-                "rule_line": f"suppress gen_id 1, sig_id {signature_id}",
-                "scope_reason": (
-                    f"Signature {signature_group['signature']} was classified as background noise "
-                    "for the full reporting window."
-                ),
-            }
-        )
-    return candidates
-
-
-def run_signature_agent(
-    signature_group: dict[str, Any],
-    decide_signature: Callable[[dict[str, Any]], dict[str, Any]],
-    analyze_alert: Callable[[dict[str, Any], dict[str, Any]], dict[str, Any]],
-) -> dict[str, Any]:
-    signature_result = decide_signature(signature_group)
-    if signature_result["decision"] == "ignore_background_noise":
-        signature_result["suppression_candidates"] = build_suppression_candidates(
-            signature_group
-        )
-        return {
-            "signature_result": signature_result,
-            "per_alert_results": [],
-            "unresolved_lookups": [],
-        }
-
-    per_alert_results: list[dict[str, Any]] = []
-    unresolved_lookups: list[str] = []
-    for alert in signature_group["alerts"]:
-        finding = analyze_alert(alert, signature_result)
-        per_alert_results.append(finding)
-        for warning in finding.get("lookup_warnings", []):
-            if warning not in unresolved_lookups:
-                unresolved_lookups.append(warning)
-    signature_result["suppression_candidates"] = []
-    return {
-        "signature_result": signature_result,
-        "per_alert_results": per_alert_results,
-        "unresolved_lookups": unresolved_lookups,
-    }
-
-
 def render_plaintext_report(
     *,
     run_id: str | None = None,
@@ -274,7 +211,7 @@ def render_plaintext_report(
     ]
 
     for analysis in analyses:
-        signature_result = analysis["signature_result"]
+        signature_result = analysis["signature_triage"]
         lines.append(
             f"- {signature_result['signature']}: {signature_result['alert_count']} alerts, "
             f"decision={signature_result['decision']}, confidence={signature_result['confidence']}"
@@ -283,31 +220,35 @@ def render_plaintext_report(
     ignored = [
         analysis
         for analysis in analyses
-        if analysis["signature_result"]["decision"] == "ignore_background_noise"
+        if analysis["signature_triage"]["decision"] == "ignore_background_noise"
     ]
     lines.extend(["", "Ignored Signatures"])
     if not ignored:
         lines.append("- None")
     for analysis in ignored:
-        signature_result = analysis["signature_result"]
+        signature_result = analysis["signature_triage"]
         lines.append(
             f"- {signature_result['signature']}: {signature_result['reasoning_summary']}"
         )
-        for candidate in signature_result["suppression_candidates"]:
-            lines.append(f"  # {candidate['scope_reason']}")
-            lines.append(f"  threshold.config: {candidate['rule_line']}")
 
     analyzed = [
         analysis
         for analysis in analyses
-        if analysis["signature_result"]["decision"] == "analyze_individually"
+        if analysis["signature_triage"]["decision"] == "investigate"
     ]
-    lines.extend(["", "Signatures Analyzed Individually"])
+    lines.extend(["", "Signatures Investigated"])
     if not analyzed:
         lines.append("- None")
     else:
         for analysis in analyzed:
-            lines.append(f"- {analysis['signature_result']['signature']}")
+            signature_result = analysis["signature_triage"]
+            lines.append(
+                f"- {signature_result['signature']}: "
+                f"{signature_result['alert_count']} alerts observed, "
+                f"{analysis.get('alerts_selected_for_investigation', len(analysis['per_alert_results']))} "
+                "selected for deep investigation, "
+                f"{analysis.get('alerts_skipped_by_jev', 0)} filtered after local triage"
+            )
 
     verdict_sections: list[tuple[Verdict, str]] = [
         ("proof_of_malware", "Proof of Malware"),
@@ -345,35 +286,6 @@ def render_plaintext_report(
     else:
         for warning in unresolved:
             lines.append(f"- {warning}")
-
-    instruction_lines = [
-        "",
-        "Coding Agent Instruction",
-        "",
-        "Open provisioning/templates/app_configs/suricata-disable.conf.j2.",
-        "Add the ignore rules below.",
-        "Keep the reason comment and the run_id provenance with each rule.",
-        "",
-        f"Provenance: {run_id_line}",
-        "",
-    ]
-    if not ignored:
-        instruction_lines.append("No ignore rules were generated for this report.")
-    else:
-        for analysis in ignored:
-            signature_result = analysis["signature_result"]
-            instruction_lines.append(
-                f"- {signature_result['signature']}: {signature_result['reasoning_summary']}"
-            )
-            for candidate in signature_result["suppression_candidates"]:
-                instruction_lines.append(
-                    f"  # run_id={run_id or 'unknown'} | {candidate['scope_reason']}"
-                )
-                instruction_lines.append(
-                    f"  threshold.config: {candidate['rule_line']}"
-                )
-
-    lines.extend(instruction_lines)
 
     return "\n".join(lines)
 

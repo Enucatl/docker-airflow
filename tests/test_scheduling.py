@@ -16,7 +16,7 @@ def test_zanzara_scheduled_range_includes_previous_day_and_boundary() -> None:
 def test_timers_are_utc_and_do_not_catch_up() -> None:
     yaml = Path("../puppet-control-repo/data/nodes/docker.yaml").read_text()
     assert yaml.count("Persistent=false") >= 4
-    assert "OnCalendar=*-*-* *:00:00 UTC" in yaml
+    assert "OnCalendar=*-*-* 00,05..23:00:00 UTC" in yaml
     assert "OnCalendar=*-*-01 03:00:00 UTC" in yaml
     assert "OnCalendar=Fri *-*-* 02:00:00 UTC" in yaml
     assert yaml.count("docker compose run --build --rm --no-deps") >= 5

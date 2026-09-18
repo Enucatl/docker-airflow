@@ -51,8 +51,11 @@ Runs Friday at 02:00 UTC. Synchronizes repositories from
 `config/operations-repositories.json`, analyzes operational errors, and emails
 diagnoses. LLM endpoint: Vault connection `operations_analyst_openrouter`.
 
-The cyber analyst uses the dedicated Vault connection
-`cyber_analyst_openrouter`.
+The cyber analyst uses `cyber_analyst_triage` for Jev routing and the separate
+`cyber_analyst_openrouter` connection for final alert reasoning.
+The triage connection stores its TypeSafe endpoint in `endpoint` (or
+`base_url`) and its token in the connection password or `api_key` extra;
+`model` defaults to `jev-latest`.
 
 ## Cutover checks
 

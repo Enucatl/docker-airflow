@@ -109,6 +109,7 @@ class VaultConnections:
             "telegram_default",
             "smtp_default",
             "loki",
+            "cyber_analyst_triage",
             "cyber_analyst_openrouter",
             "operations_analyst_openrouter",
             "greynoise",
