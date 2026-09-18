@@ -23,7 +23,7 @@ This is a uv workspace (`packages/*`, `images/*`) with a single root `uv.lock`.
 
 | Service | Package | Schedule (UTC, via Puppet) |
 |---------|---------|----------------------------|
-| `exam` | `exam` | hourly `*:00:00` |
+| `exam` | `exam` | hourly at `00:00` and `05:00`–`23:00` UTC |
 | `download-zanzara` | `download-zanzara` | daily `00:00:00` |
 | `cyber-analyst` | `cyber-analyst` | monthly `01 03:00:00` |
 | `operations-analyst` | `operations-analyst` | Friday `02:00:00` |
