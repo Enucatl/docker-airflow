@@ -1,68 +1,46 @@
 from datetime import UTC, datetime, timedelta
-import json
 import subprocess
 
-import httpx
 import pytest
-from langchain_core.messages import AIMessage
-import langchain_openai
-import openai
 
 from operations_analyst import (
     CONTROL_PLANE_GUIDANCE,
+    EPISODE_GAP,
+    EPISODE_INVESTIGATION_SCORE_THRESHOLD,
+    FINGERPRINT_INVESTIGATION_SCORE_THRESHOLD,
+    MAX_DEEP_FINDINGS,
+    MAX_LOCAL_CONTEXT_LOGS,
+    MAX_LOCAL_CONTEXT_QUERIES_PER_EPISODE,
+    Diagnosis,
+    EmitterKey,
+    EpisodeFingerprint,
+    EpisodeLocalContext,
+    EpisodeSummary,
     Evidence,
     Finding,
+    FingerprintLocalContext,
+    LogOccurrence,
+    LocalLog,
     RepositoryCorpus,
+    ResearchPlan,
+    TriageScore,
     analyze_findings,
+    aggregate_findings,
+    build_fingerprint_jev_state,
+    build_operational_episodes,
     codex_prompt,
+    derive_fingerprint_context,
+    enrich_episode_context,
     fingerprint,
+    rank_deep_candidates,
     redact_web_query,
     render_email_report,
     render_report,
+    select_context_windows,
+    triage_episode_with_jev,
+    triage_fingerprint_with_jev,
     weekly_slices,
 )
-
-
-def _connection(extra=None):
-    class Connection:
-        host = "https://openrouter.ai/api/v1"
-        password = "test-key"
-
-    Connection.extra = {"model": "test-model", **(extra or {})}
-
-    return Connection()
-
-
-class _Vault:
-    def __init__(self, connection=None):
-        self.connection = connection or _connection()
-
-    def get(self, _name):
-        return self.connection
-
-
-def _install_fake_chat(monkeypatch, outcomes, captured=None):
-    class Client:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-            self.outcomes = outcomes
-            if captured is not None:
-                captured.append(self)
-
-        def with_structured_output(self, schema, **kwargs):
-            self.structured_schema = schema
-            self.structured_kwargs = kwargs
-            return self
-
-        def invoke(self, prompt):
-            self.prompt = prompt
-            outcome = self.outcomes.pop(0)
-            if isinstance(outcome, BaseException):
-                raise outcome
-            return outcome
-
-    monkeypatch.setattr(langchain_openai, "ChatOpenAI", Client)
-    return Client
 
 
 def test_fingerprint_masks_dynamic_values_without_mutating_evidence():
@@ -105,6 +83,13 @@ def test_corpus_allows_any_file_but_confines_paths(tmp_path):
 
     assert corpus.sync() == []
     assert corpus.read_file("repo", "uv.lock")["content"] == "public generated material"
+    (source / "uv.lock").write_text("updated generated material")
+    subprocess.run(["git", "-C", source, "commit", "-am", "Update"], check=True)
+
+    assert corpus.sync() == []
+    assert (
+        corpus.read_file("repo", "uv.lock")["content"] == "updated generated material"
+    )
     assert corpus.search("repo", "generated")
     with pytest.raises(ValueError, match="escapes"):
         corpus.read_file("repo", "../manifest.json")
@@ -265,654 +250,488 @@ def test_historical_docker_host_fallback(monkeypatch):
     assert finding.host == "docker.home.arpa"
 
 
-def test_triage_limits_are_conservative():
-    from operations_analyst import (
-        MAX_MODEL_TEXT,
-        MAX_REPOSITORY_TEXT,
-        MAX_TRIAGE_FINDINGS,
-        TRIAGE_BATCH_SIZE,
+def _occurrence(
+    timestamp: datetime,
+    fingerprint_value: str = "fp",
+    *,
+    host: str = "host",
+    service: str = "service",
+    source: str = "job",
+    level: str = "error",
+    service_label: str = "service_name",
+    line: str | None = None,
+) -> LogOccurrence:
+    occurrence_line = line or f"{level} {fingerprint_value} at {timestamp.isoformat()}"
+    occurrence_template = (
+        fingerprint(occurrence_line)[1] if line else f"template {fingerprint_value}"
+    )
+    return LogOccurrence(
+        timestamp=timestamp,
+        line=occurrence_line,
+        fingerprint=fingerprint_value,
+        template=occurrence_template,
+        host=host,
+        service=service,
+        source=source,
+        level=level,
+        service_label=service_label,
     )
 
-    assert MAX_TRIAGE_FINDINGS <= 200
-    assert TRIAGE_BATCH_SIZE <= 25
-    assert MAX_MODEL_TEXT <= 1200
-    assert MAX_REPOSITORY_TEXT <= 12000
+
+class _GateProvider:
+    def __init__(self, episode_score: float, fingerprint_score: float = 0.0):
+        self.episode_score = episode_score
+        self.fingerprint_score = fingerprint_score
+        self.calls: list[tuple[dict[str, object], str]] = []
+
+    def score(self, state, *, question_name, instructions, criteria):
+        self.calls.append((state, question_name))
+        score = (
+            self.episode_score
+            if question_name == "episode_investigation"
+            else self.fingerprint_score
+        )
+        return TriageScore(
+            score=score,
+            probabilities={0: 0.1, 1: 0.2, 2: 0.3, 3: 0.4},
+            confidence=0.8,
+        )
 
 
-def test_malformed_structured_response_keeps_triage_unresolved(monkeypatch):
-    captured = []
-    namespace = {}
-    exec(
-        compile(
-            "def parse_chat_completion():\n"
-            "    raise TypeError(\"'NoneType' object is not iterable\")\n",
-            "/opt/test/.venv/lib/python3.14/site-packages/openai/lib/_parsing/_completions.py",
-            "exec",
-        ),
-        namespace,
-    )
-
-    class FailingClient:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-            captured.append(self)
-
-        def with_structured_output(self, _schema, **_kwargs):
-            return self
-
-        def invoke(self, _prompt):
-            namespace["parse_chat_completion"]()
-
-    monkeypatch.setattr(langchain_openai, "ChatOpenAI", FailingClient)
-    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
-
-    analyzed, warnings = analyze_findings(_Vault(), [finding], None)
-
-    assert analyzed[0].classification == "unclear"
-    assert warnings == [
-        "Triage batch 1: empty or malformed provider response; affected findings remain unresolved"
+def test_episode_gap_and_emitter_rules_are_deterministic():
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    occurrences = [
+        _occurrence(start + timedelta(minutes=20), "b", service="other"),
+        _occurrence(start + timedelta(minutes=10), "a", level="warning"),
+        _occurrence(start, "a"),
+        _occurrence(start + timedelta(minutes=21), "a"),
+        _occurrence(start + timedelta(minutes=9), "a"),
+        _occurrence(start, "a", source="another-job"),
     ]
-    assert captured[0].kwargs["extra_body"]["provider"] == {
-        "data_collection": "deny",
-        "require_parameters": True,
-    }
+
+    episodes = build_operational_episodes(occurrences)
+
+    assert EPISODE_GAP == timedelta(minutes=10)
+    assert len(episodes) == 4
+    same_emitter = [
+        episode
+        for episode in episodes
+        if episode.emitter == EmitterKey("host", "service", "job")
+    ]
+    assert len(same_emitter) == 2
+    assert same_emitter[0].total_events == 3
+    assert same_emitter[0].start == start
+    assert same_emitter[0].end == start + timedelta(minutes=10)
 
 
-def test_unrelated_type_error_propagates(monkeypatch):
-    class Client:
-        def __init__(self, **_kwargs):
-            pass
+def test_episode_fingerprint_and_global_fingerprint_identity_are_stable():
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    line_a = "2026-01-01T00:00:00Z refused 10.0.0.1 id=abc123456789012345678901"
+    line_b = "2026-01-02T00:00:00Z refused 10.0.0.2 id=xyz123456789012345678901"
+    digest_a, template = fingerprint(line_a)
+    digest_b, _ = fingerprint(line_b)
+    assert digest_a == digest_b
 
-        def with_structured_output(self, _schema, **_kwargs):
-            return self
+    occurrences = [
+        _occurrence(start, digest_a, line=line_a),
+        _occurrence(start + timedelta(minutes=11), digest_b, line=line_b),
+    ]
+    episodes = build_operational_episodes(occurrences)
+    findings = aggregate_findings(occurrences)
 
-        def invoke(self, _prompt):
-            raise TypeError("'NoneType' object is not iterable")
+    assert len(episodes) == 2
+    assert [item.fingerprints[0].fingerprint for item in episodes] == [
+        digest_a,
+        digest_b,
+    ]
+    assert findings[0].fingerprint == digest_a
+    assert findings[0].count == 2
+    assert findings[0].template == template
 
-    monkeypatch.setattr(langchain_openai, "ChatOpenAI", Client)
-    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
 
-    with pytest.raises(TypeError, match="NoneType"):
-        analyze_findings(_Vault(), [finding], None)
+def test_stage_one_rejects_before_enrichment(monkeypatch):
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    occurrences = [_occurrence(start)]
+    episodes = build_operational_episodes(occurrences)
+    findings = aggregate_findings(occurrences)
+    provider = _GateProvider(EPISODE_INVESTIGATION_SCORE_THRESHOLD - 0.01)
+
+    enrich_calls = []
+    monkeypatch.setattr(
+        "operations_analyst.enrich_episode_context",
+        lambda episode: enrich_calls.append(episode) or EpisodeLocalContext(),
+    )
+    analyzed, warnings = analyze_findings(
+        object(), findings, None, episodes=episodes, jev_provider=provider
+    )
+
+    assert not warnings
+    assert enrich_calls == []
+    assert episodes[0].local_context is None
+    assert len(provider.calls) == 1
+    assert analyzed[0].episode_summaries[0].stage2_score is None
 
 
-def test_native_structured_output_uses_schema_method_and_validates(monkeypatch):
-    captured = []
-    _install_fake_chat(
-        monkeypatch,
-        [
-            {
-                "decisions": [
-                    {"fingerprint": "fingerprint", "classification": "expected_noise"}
+def test_stage_one_threshold_and_routing_use_score_only():
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    episode = build_operational_episodes([_occurrence(start)])[0]
+
+    class Provider:
+        def __init__(self, score, probabilities, confidence):
+            self.answer = TriageScore(
+                score=score, probabilities=probabilities, confidence=confidence
+            )
+
+        def score(self, state, **kwargs):
+            return self.answer
+
+    low_confidence = triage_episode_with_jev(
+        episode, Provider(EPISODE_INVESTIGATION_SCORE_THRESHOLD, {0: 1.0}, 0.1)
+    )
+    high_confidence = triage_episode_with_jev(
+        episode, Provider(EPISODE_INVESTIGATION_SCORE_THRESHOLD, {3: 1.0}, 0.99)
+    )
+
+    assert low_confidence.score >= EPISODE_INVESTIGATION_SCORE_THRESHOLD
+    assert high_confidence.score >= EPISODE_INVESTIGATION_SCORE_THRESHOLD
+    assert low_confidence.confidence != high_confidence.confidence
+    assert low_confidence.probabilities != high_confidence.probabilities
+
+
+def test_stage_one_fail_open_selects_for_enrichment(monkeypatch):
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    occurrences = [_occurrence(start)]
+    episodes = build_operational_episodes(occurrences)
+    findings = aggregate_findings(occurrences)
+
+    class FailingStageOne:
+        def __init__(self):
+            self.calls = 0
+
+        def score(self, state, *, question_name, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("provider unavailable")
+            return TriageScore(score=0, probabilities={0: 1.0}, confidence=1.0)
+
+    provider = FailingStageOne()
+    monkeypatch.setattr(
+        "operations_analyst.enrich_episode_context",
+        lambda episode: EpisodeLocalContext(),
+    )
+    analyzed, warnings = analyze_findings(
+        object(), findings, None, episodes=episodes, jev_provider=provider
+    )
+
+    assert any("selected fail-open" in warning for warning in warnings)
+    assert episodes[0].stage1_score.score == 3
+    assert provider.calls == 2
+    assert analyzed[0].episode_summaries[0].stage2_score == 0
+
+
+def test_local_enrichment_has_episode_query_bound_and_reuses_info_warning(monkeypatch):
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    occurrences = [
+        _occurrence(start + timedelta(minutes=index * 9), str(index))
+        for index in range(20)
+    ]
+    episode = build_operational_episodes(occurrences)[0]
+    queries = []
+
+    def query(_connection, *, query, start, end, limit):
+        queries.append((query, start, end, limit))
+        timestamp = int(start.timestamp() * 1_000_000_000)
+        return {
+            "data": {
+                "result": [
+                    {
+                        "stream": {
+                            "job": "job",
+                            "service_name": "service",
+                            "detected_level": "info",
+                        },
+                        "values": [[str(timestamp), "service starting"]],
+                    },
+                    {
+                        "stream": {
+                            "job": "job",
+                            "service_name": "service",
+                            "detected_level": "warning",
+                        },
+                        "values": [[str(timestamp + 1), "retrying connection"]],
+                    },
                 ]
             }
-        ],
-        captured,
-    )
-    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
+        }
 
-    analyzed, warnings = analyze_findings(_Vault(), [finding], None)
+    monkeypatch.setattr("common.loki.query_loki_range", query)
+    context = enrich_episode_context(episode)
 
-    assert not warnings
-    assert analyzed[0].classification == "expected_noise"
-    assert captured[0].structured_kwargs == {"method": "json_schema", "strict": True}
-    assert captured[0].kwargs["extra_body"] == {
-        "provider": {"data_collection": "deny", "require_parameters": True}
-    }
+    assert len(queries) <= MAX_LOCAL_CONTEXT_QUERIES_PER_EPISODE
+    assert context.query_count == len(queries)
+    local = derive_fingerprint_context(episode, episode.fingerprints[0], context)
+    assert local.info_count >= 1
+    assert local.warning_count >= 1
+    assert any("service starting" in line for line in local.representative_lines)
 
 
-def test_prompt_json_mode_supports_deepseek_without_native_structured_output(
-    monkeypatch,
-):
-    captured = []
-    _install_fake_chat(
-        monkeypatch,
-        [
-            AIMessage(
-                content=json.dumps(
-                    {
-                        "decisions": [
-                            {
-                                "fingerprint": "fingerprint",
-                                "classification": "expected_noise",
-                            }
-                        ]
-                    }
-                )
-            )
-        ],
-        captured,
-    )
-    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
-
-    analyzed, warnings = analyze_findings(
-        _Vault(
-            _connection(
-                {
-                    "model": "deepseek/deepseek-v4.1-flash",
-                    "structured_output_mode": "prompt_json",
-                }
-            )
-        ),
-        [finding],
-        None,
-    )
-
-    assert not warnings
-    assert analyzed[0].classification == "expected_noise"
-    assert not hasattr(captured[0], "structured_kwargs")
-    assert "JSON Schema" in captured[0].prompt
-    assert captured[0].kwargs["extra_body"] == {"provider": {"data_collection": "deny"}}
-
-
-def test_auto_falls_back_once_for_unsupported_native_output(monkeypatch):
-    captured = []
-
-    class Unsupported(Exception):
-        status_code = 400
-        code = "unsupported_parameter"
-
-    class Client:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-            captured.append(self)
-
-        def with_structured_output(self, _schema, **_kwargs):
-            return self
-
-        def invoke(self, _prompt):
-            if self.kwargs["extra_body"]["provider"].get("require_parameters"):
-                raise Unsupported("response_format is unsupported by the provider")
-            return AIMessage(
-                content=json.dumps(
-                    {
-                        "decisions": [
-                            {
-                                "fingerprint": "fingerprint",
-                                "classification": "expected_noise",
-                            }
-                        ]
-                    }
-                )
-            )
-
-    monkeypatch.setattr(langchain_openai, "ChatOpenAI", Client)
-    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
-
-    analyzed, warnings = analyze_findings(_Vault(), [finding], None)
-
-    assert not warnings
-    assert analyzed[0].classification == "expected_noise"
-    assert len(captured) == 2
-    assert captured[1].kwargs["extra_body"]["provider"] == {"data_collection": "deny"}
-
-
-def test_auto_falls_back_for_openrouter_no_endpoints_native_response(monkeypatch):
-    captured = []
-    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
-    response = httpx.Response(404, request=request)
-    native_error = openai.NotFoundError(
-        "No endpoints found for this model",
-        response=response,
-        body={"error": {"message": "No endpoints found for this model"}},
-    )
-
-    class Client:
-        def __init__(self, **kwargs):
-            self.kwargs = kwargs
-            captured.append(self)
-
-        def with_structured_output(self, _schema, **_kwargs):
-            return self
-
-        def invoke(self, _prompt):
-            if self.kwargs["extra_body"]["provider"].get("require_parameters"):
-                raise native_error
-            return AIMessage(
-                content=json.dumps(
-                    {
-                        "decisions": [
-                            {
-                                "fingerprint": "fingerprint",
-                                "classification": "expected_noise",
-                            }
-                        ]
-                    }
-                )
-            )
-
-    monkeypatch.setattr(langchain_openai, "ChatOpenAI", Client)
-    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
-
-    analyzed, warnings = analyze_findings(_Vault(), [finding], None)
-
-    assert not warnings
-    assert analyzed[0].classification == "expected_noise"
-    assert len(captured) == 2
-
-
-def test_no_endpoints_in_compatibility_mode_remains_permanent(monkeypatch):
+def test_local_enrichment_uses_the_service_label_that_defined_the_emitter():
     import operations_analyst as analyst
 
-    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
-    response = httpx.Response(404, request=request)
-    error = openai.NotFoundError(
-        "No endpoints found for this model",
-        response=response,
-        body={"error": {"message": "No endpoints found for this model"}},
-    )
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    container_episode = build_operational_episodes(
+        [_occurrence(start, service_label="container_name")]
+    )[0]
+    job_episode = build_operational_episodes(
+        [_occurrence(start, service="job", service_label="job")]
+    )[0]
 
-    assert analyst._normalize_llm_exception(error, "prompt_json") is None
-
-
-@pytest.mark.parametrize("status", [401, 403])
-def test_authentication_and_authorization_failures_escape(monkeypatch, status):
-    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
-    response = httpx.Response(status, request=request)
-    error_class = (
-        openai.AuthenticationError if status == 401 else openai.PermissionDeniedError
-    )
-    error = error_class(
-        "secret response body", response=response, body={"secret": "body"}
-    )
-
-    _install_fake_chat(monkeypatch, [error])
-    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
-
-    with pytest.raises(error_class):
-        analyze_findings(_Vault(), [finding], None)
+    assert 'container_name="service"' in analyst._emitter_query(container_episode)
+    assert "service_name" not in analyst._emitter_query(container_episode)
+    assert 'job="job"' in analyst._emitter_query(job_episode)
+    assert "service_name" not in analyst._emitter_query(job_episode)
 
 
-def test_retries_timeout_then_succeeds(monkeypatch):
-    calls = []
-    _install_fake_chat(
-        monkeypatch,
-        [
-            openai.APITimeoutError(
-                httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
-            ),
-            {
-                "decisions": [
-                    {"fingerprint": "fingerprint", "classification": "expected_noise"}
-                ]
-            },
-        ],
-        calls,
-    )
-    sleeps = []
-    monkeypatch.setattr("operations_analyst.time.sleep", sleeps.append)
-    monkeypatch.setattr("operations_analyst.random.uniform", lambda _a, _b: 0.0)
-    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
-
-    analyzed, warnings = analyze_findings(_Vault(), [finding], None)
-
-    assert not warnings
-    assert analyzed[0].classification == "expected_noise"
-    assert sleeps == [1.0]
-
-
-def test_retry_after_is_parsed_and_capped(monkeypatch):
-    import operations_analyst as analyst
-
-    request = httpx.Request("POST", "https://openrouter.ai/api/v1/chat/completions")
-    response = httpx.Response(429, request=request, headers={"Retry-After": "120"})
-    error = openai.RateLimitError("provider unavailable", response=response, body={})
-    failure = analyst._normalize_llm_exception(error)
-
-    assert failure is not None
-    assert analyst._retry_delay(failure, 1) == 60.0
-
-    invalid_response = httpx.Response(
-        429, request=request, headers={"Retry-After": "invalid"}
-    )
-    invalid_error = openai.RateLimitError(
-        "provider unavailable", response=invalid_response, body={}
-    )
-    invalid_failure = analyst._normalize_llm_exception(invalid_error)
-    monkeypatch.setattr("operations_analyst.random.uniform", lambda _a, _b: 0.0)
-
-    assert invalid_failure is not None
-    assert invalid_failure.retry_after is None
-    assert analyst._retry_delay(invalid_failure, 1) == 1.0
-
-
-def test_rate_limit_exhaustion_is_unresolved_and_reason_specific(monkeypatch, caplog):
-    request_url = "https://openrouter.ai/api/v1/chat/completions"
-    errors = []
-    for _ in range(3):
-        request = httpx.Request("POST", request_url)
-        response = httpx.Response(429, request=request, headers={"Retry-After": "5"})
-        errors.append(
-            openai.RateLimitError(
-                "secret response body", response=response, body={"secret": "body"}
-            )
+def test_local_enrichment_samples_across_a_noisy_context_window(monkeypatch):
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    episode = build_operational_episodes([_occurrence(start)])[0]
+    logs = [
+        LocalLog(
+            timestamp=start + timedelta(seconds=index),
+            line=f"log-{index}",
+            fingerprint=f"fp-{index}",
+            template=f"template-{index}",
+            level="info",
         )
-    calls = []
-    _install_fake_chat(monkeypatch, errors, calls)
-    sleeps = []
-    monkeypatch.setattr("operations_analyst.time.sleep", sleeps.append)
-    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
-
-    analyzed, warnings = analyze_findings(_Vault(), [finding], None)
-
-    assert analyzed[0].classification == "unclear"
-    assert warnings == [
-        "Triage batch 1: provider unavailable after retries; affected findings remain unresolved"
+        for index in range(MAX_LOCAL_CONTEXT_LOGS + 100)
     ]
-    assert sleeps == [5.0, 5.0]
-    assert all("secret" not in record.getMessage() for record in caplog.records)
+
+    monkeypatch.setattr("operations_analyst.query_episode_context", lambda *_: logs)
+    context = enrich_episode_context(episode)
+
+    assert len(context.logs) == MAX_LOCAL_CONTEXT_LOGS
+    assert context.logs[0].line == "log-0"
+    assert context.logs[-1].line == f"log-{MAX_LOCAL_CONTEXT_LOGS + 99}"
 
 
-@pytest.mark.parametrize(
-    "payload",
-    [
-        AIMessage(content=""),
-        AIMessage(content="not json"),
-        AIMessage(content=json.dumps({"wrong": []})),
-        AIMessage(content="refused", additional_kwargs={"refusal": "secret refusal"}),
-    ],
-)
-def test_prompt_json_failures_are_unresolved(monkeypatch, payload):
-    _install_fake_chat(monkeypatch, [payload])
-    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
+def test_overlapping_context_windows_are_deduplicated():
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    episode = build_operational_episodes(
+        [_occurrence(start), _occurrence(start + timedelta(minutes=1), "two")]
+    )[0]
+    windows = select_context_windows(episode)
+    assert len(windows) == 1
 
-    analyzed, warnings = analyze_findings(
-        _Vault(_connection({"structured_output_mode": "prompt_json"})),
-        [finding],
-        None,
+
+def test_stage_two_state_contains_bounded_episode_context():
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    episode = build_operational_episodes([_occurrence(start)])[0]
+    context = FingerprintLocalContext(
+        representative_lines=["info before", "warning before"],
+        nearby_templates=[{"template": "recovered", "count": 1}],
+        info_count=1,
+        warning_count=1,
     )
+    state = build_fingerprint_jev_state(episode, episode.fingerprints[0], context)
 
-    assert analyzed[0].classification == "unclear"
-    assert warnings[0].startswith("Triage batch 1: ")
-    assert "secret" not in warnings[0]
-
-
-@pytest.mark.parametrize(
-    ("decisions", "expected"),
-    [
-        ([{"fingerprint": "fingerprint", "classification": "expected_noise"}], None),
-        ([], "missing=1, duplicated=0, unexpected=0"),
-        (
-            [{"fingerprint": "fingerprint", "classification": "expected_noise"}] * 2,
-            "missing=0, duplicated=1, unexpected=0",
-        ),
-        (
-            [{"fingerprint": "other", "classification": "expected_noise"}],
-            "missing=1, duplicated=0, unexpected=1",
-        ),
-    ],
-)
-def test_triage_response_cardinality_is_all_or_nothing(
-    monkeypatch, decisions, expected
-):
-    _install_fake_chat(monkeypatch, [{"decisions": decisions}])
-    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
-
-    analyzed, warnings = analyze_findings(_Vault(), [finding], None)
-
-    if expected is None:
-        assert analyzed[0].classification == "expected_noise"
-        assert not warnings
-    else:
-        assert analyzed[0].classification == "unclear"
-        assert expected in warnings[0]
-        assert "fingerprint" not in warnings[0]
+    assert set(state) == {"emitter", "episode_summary", "fingerprint", "local_context"}
+    assert state["local_context"]["representative_lines"] == [
+        "info before",
+        "warning before",
+    ]
+    assert "values" not in str(state)
 
 
-def test_reasoning_and_privacy_parameters_are_stage_specific(monkeypatch):
-    captured = []
-    _install_fake_chat(
-        monkeypatch,
-        [
-            {
-                "decisions": [
-                    {
-                        "fingerprint": "fingerprint",
-                        "classification": "actionable_failure",
-                    }
-                ]
-            },
-            {
-                "additional_log_queries": [],
-                "repository_files": [],
-                "repository_searches": [],
-                "web_queries": [],
-            },
-            {
-                "impact": "low",
-                "severity": "low",
-                "remediation_kind": "unknown",
-                "cause_status": "unknown",
-                "confidence": "low",
-                "analysis": "insufficient evidence",
-                "repair_plan": "collect more evidence",
-            },
-        ],
-        captured,
+def test_stage_two_threshold_and_score_only_routing():
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    episode = build_operational_episodes([_occurrence(start)])[0]
+    context = FingerprintLocalContext()
+
+    class Provider:
+        def score(self, state, **kwargs):
+            return TriageScore(
+                score=FINGERPRINT_INVESTIGATION_SCORE_THRESHOLD,
+                probabilities={0: 1.0},
+                confidence=0.01,
+            )
+
+    result = triage_fingerprint_with_jev(
+        episode, episode.fingerprints[0], context, Provider()
     )
-    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
-
-    class Corpus:
-        def list_repositories(self):
-            return []
-
-    analyze_findings(
-        _Vault(_connection({"zdr": True, "triage_reasoning_effort": "low"})),
-        [finding],
-        Corpus(),
-    )
-
-    assert captured[0].kwargs["extra_body"] == {
-        "provider": {
-            "data_collection": "deny",
-            "require_parameters": True,
-            "zdr": True,
-        },
-        "reasoning": {"effort": "low"},
-    }
-    assert captured[1].kwargs["extra_body"] == {
-        "provider": {
-            "data_collection": "deny",
-            "require_parameters": True,
-            "zdr": True,
-        },
-        "reasoning": {"effort": "low"},
-    }
+    assert result.score >= FINGERPRINT_INVESTIGATION_SCORE_THRESHOLD
 
 
-def test_real_chat_openai_request_handles_choices_null_without_leaking_secrets(
-    monkeypatch, caplog
-):
-    requests = []
+def test_deep_candidate_ranking_prioritizes_score_and_is_deterministic():
+    import operations_analyst as analyst
 
-    def transport(request):
-        requests.append(json.loads(request.content))
-        return httpx.Response(
-            200,
-            json={
-                "id": "completion-id",
-                "object": "chat.completion",
-                "created": 1,
-                "model": "test-model",
-                "choices": None,
-                "usage": {
-                    "prompt_tokens": 1,
-                    "completion_tokens": 1,
-                    "total_tokens": 2,
-                },
-            },
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    episode = build_operational_episodes([_occurrence(start, "fp")])[0]
+    candidates = []
+    for score, count in [(2.1, 100), (3.0, 1), (2.5, 2)]:
+        fingerprint_value = EpisodeFingerprint(
+            fingerprint=f"fp-{score}",
+            template="error",
+            count=count,
+            levels={"error": count},
+            first_seen=start,
+            last_seen=start,
+        )
+        candidates.append(
+            analyst.FingerprintEpisodeCandidate(
+                fingerprint=fingerprint_value,
+                episode=episode,
+                local_context=FingerprintLocalContext(),
+                score=TriageScore(score=score, probabilities={}, confidence=0.5),
+            )
         )
 
-    real_chat_openai = langchain_openai.ChatOpenAI
+    ranked = rank_deep_candidates(candidates)
+    assert [item.score.score for item in ranked] == [3.0, 2.5, 2.1]
 
-    def chat_openai_with_mock_transport(**kwargs):
-        kwargs["http_client"] = httpx.Client(transport=httpx.MockTransport(transport))
-        return real_chat_openai(**kwargs)
 
-    monkeypatch.setattr(langchain_openai, "ChatOpenAI", chat_openai_with_mock_transport)
+def test_repeated_fingerprint_aggregates_but_keeps_episode_summaries():
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    occurrences = [
+        _occurrence(start, "same"),
+        _occurrence(start + timedelta(minutes=11), "same"),
+    ]
+    episodes = build_operational_episodes(occurrences)
+    findings = aggregate_findings(occurrences)
+
+    assert findings[0].count == 2
+    assert findings[0].fingerprint == episodes[0].fingerprints[0].fingerprint
+    assert len(episodes) == 2
+
+
+def test_global_deep_budget_limits_reasoning_and_reuses_episode_context(monkeypatch):
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    occurrences = [
+        _occurrence(start + timedelta(seconds=index), f"fp-{index}")
+        for index in range(MAX_DEEP_FINDINGS + 1)
+    ]
+    episodes = build_operational_episodes(occurrences)
+    findings = aggregate_findings(occurrences)
+    provider = _GateProvider(3.0, 3.0)
+    enrichment_calls = []
+    model_calls = []
+
+    monkeypatch.setattr(
+        "operations_analyst.enrich_episode_context",
+        lambda episode: enrichment_calls.append(episode) or EpisodeLocalContext(),
+    )
+
+    def invoke(schema, _prompt, stage):
+        model_calls.append(stage)
+        if schema is ResearchPlan:
+            return ResearchPlan()
+        return Diagnosis(
+            impact="service degraded",
+            severity="high",
+            remediation_kind="configuration",
+            cause_status="likely",
+            confidence="high",
+            analysis="configuration is invalid",
+            repair_plan="restore the managed configuration",
+        )
+
+    analyzed, warnings = analyze_findings(
+        object(),
+        findings,
+        None,
+        episodes=episodes,
+        jev_provider=provider,
+        reasoning_invoker=invoke,
+    )
+
+    assert len(enrichment_calls) == 1
+    assert model_calls.count("research_plan") == MAX_DEEP_FINDINGS
+    assert model_calls.count("diagnosis") == MAX_DEEP_FINDINGS
+    assert len(model_calls) == MAX_DEEP_FINDINGS * 2
+    assert sum(len(finding.diagnoses) for finding in analyzed) == MAX_DEEP_FINDINGS
+    assert any("global investigation budget" in warning for warning in warnings)
+
+
+def test_actionable_episode_diagnosis_is_not_overwritten_by_a_later_one(monkeypatch):
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    occurrences = [
+        _occurrence(start, "same"),
+        _occurrence(start + timedelta(minutes=11), "same"),
+    ]
+    episodes = build_operational_episodes(occurrences)
+    findings = aggregate_findings(occurrences)
+    diagnoses = iter(
+        [
+            Diagnosis(
+                impact="service degraded",
+                severity="high",
+                remediation_kind="configuration",
+                cause_status="likely",
+                confidence="high",
+                analysis="configuration is invalid",
+                repair_plan="restore the managed configuration",
+            ),
+            Diagnosis(
+                impact="no durable impact established",
+                severity="low",
+                remediation_kind="unknown",
+                cause_status="unknown",
+                confidence="low",
+                analysis="later episode was transient",
+                repair_plan="",
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        "operations_analyst.enrich_episode_context", lambda _: EpisodeLocalContext()
+    )
+
+    def invoke(schema, _prompt, _stage):
+        return ResearchPlan() if schema is ResearchPlan else next(diagnoses)
+
+    analyzed, _ = analyze_findings(
+        object(),
+        findings,
+        None,
+        episodes=episodes,
+        jev_provider=_GateProvider(3.0, 3.0),
+        reasoning_invoker=invoke,
+    )
+
+    finding = analyzed[0]
+    assert finding.classification == "actionable_failure"
+    assert finding.analysis == "configuration is invalid"
+    assert len(finding.diagnoses) == 2
+
+
+def test_reporting_includes_bounded_episode_summaries():
+    start = datetime(2026, 1, 1, tzinfo=UTC)
     finding = Finding(
-        "fingerprint",
+        "fp",
         "host",
         "service",
         "job",
         "error",
         "failure",
-        1,
-        evidence=[Evidence("2026-01-01T00:00:00+00:00", "private log evidence")],
-    )
-
-    analyzed, warnings = analyze_findings(
-        _Vault(_connection({"structured_output_mode": "json_schema"})),
-        [finding],
-        None,
-    )
-
-    assert analyzed[0].classification == "unclear"
-    assert warnings == [
-        "Triage batch 1: empty or malformed provider response; affected findings remain unresolved"
-    ]
-    assert len(requests) == 1
-    assert requests[0]["provider"] == {
-        "data_collection": "deny",
-        "require_parameters": True,
-    }
-    assert requests[0]["response_format"]["type"] == "json_schema"
-    assert requests[0]["model"] == "test-model"
-    assert requests[0]["max_completion_tokens"] == 10000
-    assert "reasoning_effort" not in requests[0]
-    failure_log = next(
-        record.getMessage()
-        for record in caplog.records
-        if "model attempt failed" in record.getMessage()
-    )
-    assert "stage=triage_batch_1" in failure_log
-    assert "structured_output_mode=json_schema" in failure_log
-    assert "reason=empty_or_malformed_response" in failure_log
-    assert "attempt=1" in failure_log
-    assert "max_attempts=3" in failure_log
-    assert "elapsed_seconds=" in failure_log
-    assert all(
-        token not in record.getMessage()
-        for record in caplog.records
-        for token in ("test-key", "private log evidence")
-    )
-
-
-def test_real_prompt_json_request_omits_native_structured_parameters(monkeypatch):
-    requests = []
-
-    def transport(request):
-        requests.append(json.loads(request.content))
-        return httpx.Response(
-            200,
-            json={
-                "id": "completion-id",
-                "object": "chat.completion",
-                "created": 1,
-                "model": "deepseek/deepseek-v4.1-flash",
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": json.dumps(
-                                {
-                                    "decisions": [
-                                        {
-                                            "fingerprint": "fingerprint",
-                                            "classification": "expected_noise",
-                                        }
-                                    ]
-                                }
-                            ),
-                        },
-                        "finish_reason": "stop",
-                    }
-                ],
-            },
-        )
-
-    real_chat_openai = langchain_openai.ChatOpenAI
-
-    def chat_openai_with_mock_transport(**kwargs):
-        kwargs["http_client"] = httpx.Client(transport=httpx.MockTransport(transport))
-        return real_chat_openai(**kwargs)
-
-    monkeypatch.setattr(langchain_openai, "ChatOpenAI", chat_openai_with_mock_transport)
-    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
-
-    analyzed, warnings = analyze_findings(
-        _Vault(
-            _connection(
-                {
-                    "model": "deepseek/deepseek-v4.1-flash",
-                    "structured_output_mode": "prompt_json",
-                }
+        2,
+        classification="actionable_failure",
+        severity="high",
+        remediation_kind="configuration",
+        analysis="configuration drift",
+        repair_plan="restore the managed setting",
+        episode_summaries=[
+            EpisodeSummary(
+                "episode-id",
+                EmitterKey("host", "service", "job"),
+                start,
+                start + timedelta(minutes=2),
+                2,
+                stage1_score=2,
+                stage2_score=3,
             )
-        ),
-        [finding],
-        None,
+        ],
     )
+    report = render_report([finding], start, start + timedelta(days=7), [])
 
-    assert not warnings
-    assert analyzed[0].classification == "expected_noise"
-    assert requests[0]["provider"] == {"data_collection": "deny"}
-    assert "response_format" not in requests[0]
-    assert "reasoning_effort" not in requests[0]
-    assert "reasoning" not in requests[0]
-
-
-@pytest.mark.parametrize(
-    ("failed_stage", "expected_phrase"),
-    [
-        ("research_plan", "Deep research plan for host/service: output truncated"),
-        ("diagnosis", "Diagnosis for host/service: output truncated"),
-    ],
-)
-def test_research_and_diagnosis_failures_remain_unresolved(
-    monkeypatch, failed_stage, expected_phrase
-):
-    if failed_stage == "research_plan":
-        outcomes = [
-            {
-                "decisions": [
-                    {
-                        "fingerprint": "fingerprint",
-                        "classification": "actionable_failure",
-                    }
-                ]
-            },
-            openai.LengthFinishReasonError.__new__(openai.LengthFinishReasonError),
-        ]
-        outcomes[1].completion = None
-    else:
-        outcomes = [
-            {
-                "decisions": [
-                    {
-                        "fingerprint": "fingerprint",
-                        "classification": "actionable_failure",
-                    }
-                ]
-            },
-            {
-                "additional_log_queries": [],
-                "repository_files": [],
-                "repository_searches": [],
-                "web_queries": [],
-            },
-            openai.LengthFinishReasonError.__new__(openai.LengthFinishReasonError),
-        ]
-        outcomes[-1].completion = None
-    _install_fake_chat(monkeypatch, outcomes)
-    monkeypatch.setattr("operations_analyst.add_log_context", lambda _finding: None)
-
-    class Corpus:
-        def list_repositories(self):
-            return []
-
-    finding = Finding("fingerprint", "host", "service", "job", "error", "failure", 1)
-    analyzed, warnings = analyze_findings(_Vault(), [finding], Corpus())
-
-    assert analyzed[0].classification == "unclear"
-    assert warnings[0].startswith(expected_phrase)
+    assert "Episodes: 1" in report
+    assert "stage-2 score 3.00" in report
+    assert "episode-id" not in report

@@ -50,6 +50,9 @@ docker compose run --build --rm --no-deps exam preflight
 Runs Friday at 02:00 UTC. Synchronizes repositories from
 `config/operations-repositories.json`, analyzes operational errors, and emails
 diagnoses. LLM endpoint: Vault connection `operations_analyst_openrouter`.
+Episode and fingerprint routing use the independent TypeSafe/Jev provider from
+Vault connection `operations_analyst_typesafe` (or `TYPESAFE_API_KEY`); the
+OpenRouter connection remains reserved for research planning and diagnosis.
 
 The cyber analyst uses `cyber_analyst_triage` for Jev routing and the separate
 `cyber_analyst_openrouter` connection for final alert reasoning.

@@ -112,6 +112,7 @@ class VaultConnections:
             "cyber_analyst_triage",
             "cyber_analyst_openrouter",
             "operations_analyst_openrouter",
+            "operations_analyst_typesafe",
             "greynoise",
             "abuseipdb",
             "tavily",

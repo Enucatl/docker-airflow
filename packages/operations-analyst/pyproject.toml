@@ -11,6 +11,7 @@ dependencies = [
   "psycopg[binary]",
   "pydantic",
   "niquests",
+  "typesafe-sdk>=0.6.0,<0.7.0",
 ]
 
 [build-system]
