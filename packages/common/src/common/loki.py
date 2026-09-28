@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 import logging
+import os
 from typing import Any
 
 import niquests
@@ -33,7 +34,9 @@ def query_loki_range(
     limit: int = 1000,
 ) -> dict[str, Any]:
     conn = _connection(conn_id)
-    endpoint = f"{conn.host.rstrip('/')}/loki/api/v1/query_range"
+    endpoint = (
+        f"{os.getenv('LOKI_READ_URL', conn.host).rstrip('/')}/loki/api/v1/query_range"
+    )
     headers: dict[str, str] = {}
     extras = conn.extra
     if tenant_id := extras.get("tenant_id"):
@@ -50,6 +53,10 @@ def query_loki_range(
         },
         headers=headers,
         auth=auth,
+        cert=(
+            os.getenv("VAULT_CLIENT_CERT", "/run/secrets/fullchain"),
+            os.getenv("VAULT_CLIENT_KEY", "/run/secrets/key"),
+        ),
         verify=verify,
         timeout=60,
     )

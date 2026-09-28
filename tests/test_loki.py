@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from common.loki import query_loki_range, query_loki_range_adaptive, set_vault
 
 
-def test_query_loki_range_uses_shared_ca_bundle(monkeypatch) -> None:
+def test_query_loki_range_uses_read_endpoint_and_client_cert(monkeypatch) -> None:
     class DummyConnection:
         host = "https://loki.example"
         login = "user"
@@ -33,6 +33,7 @@ def test_query_loki_range_uses_shared_ca_bundle(monkeypatch) -> None:
         return Response()
 
     set_vault(DummyVault())
+    monkeypatch.setenv("LOKI_READ_URL", "https://loki-read.example")
     monkeypatch.setattr("common.loki.niquests.get", fake_get)
 
     result = query_loki_range(
@@ -44,6 +45,8 @@ def test_query_loki_range_uses_shared_ca_bundle(monkeypatch) -> None:
     )
 
     assert result == {"ok": True}
+    assert captured["args"] == ("https://loki-read.example/loki/api/v1/query_range",)
+    assert captured["kwargs"]["cert"] == ("/run/secrets/fullchain", "/run/secrets/key")
     assert captured["kwargs"]["verify"] == "/etc/ssl/certs/ca-certificates.crt"
 
 

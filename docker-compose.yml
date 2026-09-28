@@ -11,6 +11,7 @@ x-runner: &runner
     SSL_CERT_FILE: ${VAULT_CACERT}
     VAULT_ADDR: ${VAULT_ADDR}
     VAULT_CACERT: ${VAULT_CACERT}
+    LOKI_READ_URL: https://loki-read.${DOCKER_DOMAIN}
     PHOENIX_COLLECTOR_ENDPOINT: ${PHOENIX_COLLECTOR_ENDPOINT:-https://phoenix-otlp.${DOCKER_DOMAIN}/v1/traces}
     PHOENIX_PROJECT_NAME: ${PHOENIX_PROJECT_NAME:-cyber_analyst}
     OTEL_EXPORTER_OTLP_TRACES_CERTIFICATE: /etc/ssl/certs/ca-certificates.crt
