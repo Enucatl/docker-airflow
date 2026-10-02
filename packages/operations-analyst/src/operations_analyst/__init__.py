@@ -342,17 +342,31 @@ class JevProvider:
         )
 
 
+class RepositoryFileRequest(BaseModel):
+    """Identify one file in the repository corpus."""
+
+    repository: str = Field(description="Exact name from available_repositories")
+    path: str = Field(
+        description="Exact repository-relative file path from repository_paths"
+    )
+
+
+class RepositorySearchRequest(BaseModel):
+    """Request a literal content search within one repository."""
+
+    repository: str = Field(description="Exact name from available_repositories")
+    literal: str = Field(
+        description="Literal file content to find, not a query language or path filter"
+    )
+
+
 class ResearchPlan(BaseModel):
     additional_log_queries: list[str] = Field(
         default_factory=list,
         description="bounded LogQL queries for additional relevant evidence",
     )
-    repository_files: list[str] = Field(
-        default_factory=list, description="repository:path entries to read"
-    )
-    repository_searches: list[str] = Field(
-        default_factory=list, description="repository:literal search entries"
-    )
+    repository_files: list[RepositoryFileRequest] = Field(default_factory=list)
+    repository_searches: list[RepositorySearchRequest] = Field(default_factory=list)
     web_queries: list[str] = Field(default_factory=list)
 
 
@@ -1046,6 +1060,16 @@ class RepositoryCorpus:
         path = self._confined(name, relative)
         return sorted(child.name for child in path.iterdir())
 
+    def list_files(self, name: str) -> list[str]:
+        """List tracked paths so research requests can use existing filenames."""
+        result = subprocess.run(
+            ["git", "-C", str(self._repo(name)), "ls-files", "-z"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.rstrip("\0").split("\0") if result.stdout else []
+
     def _confined(self, name: str, relative: str) -> Path:
         repo = self._repo(name)
         path = (repo / relative).resolve()
@@ -1065,10 +1089,12 @@ class RepositoryCorpus:
     def search(self, name: str, pattern: str) -> list[str]:
         repo = self._repo(name)
         result = subprocess.run(
-            ["git", "-C", str(repo), "grep", "-n", "--", pattern],
+            ["git", "-C", str(repo), "grep", "-n", "-F", "--", pattern],
             capture_output=True,
             text=True,
         )
+        if result.returncode != 1:
+            result.check_returncode()
         return result.stdout.splitlines()
 
     def commit(self, name: str) -> str:
@@ -2020,6 +2046,12 @@ def analyze_findings(
 
     invoke_structured = reasoning_invoker or _openrouter_invoker(vault)
     available_repositories = corpus.list_repositories() if corpus is not None else []
+    repository_paths: dict[str, list[str]] = {}
+    for name in available_repositories:
+        try:
+            repository_paths[name] = corpus.list_files(name)
+        except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+            warnings.append(f"Repository file listing unavailable for {name}: {exc}")
     research_calls = 0
     diagnosis_calls = 0
     host_cache: dict[tuple[str, ...], dict[str, Any]] = {}
@@ -2067,9 +2099,13 @@ def analyze_findings(
                     "Existing local_context has already been fetched and must be reused rather than queried again. "
                     "Evidence is a zero-based list of timestamped log lines. Check shutdown, startup, and recovery before proposing repairs; "
                     "reuse host_context for simultaneous failures. A detected severity can disagree with the native log level. "
-                    "Use repository:path for files and repository:literal for searches. Web queries must contain no private addresses, "
+                    "Repository requests use separate repository and path/literal fields. Choose exact file paths from repository_paths; "
+                    "searches match literal file contents, not filenames or query syntax. Web queries must contain no private addresses, "
                     "hostnames, credentials, or unique identifiers and should target official documentation or public source repositories.\n"
-                    + json.dumps(evidence_payload)
+                    "The corpus contains committed GitHub code, not deployed worktrees; ignored files such as .env are unavailable.\n"
+                    + json.dumps(
+                        {**evidence_payload, "repository_paths": repository_paths}
+                    )
                 ),
                 "research_plan",
             )
@@ -2107,15 +2143,17 @@ def analyze_findings(
                     f"{item.timestamp.isoformat()} {item.labels.get('host', '')}/{item.labels.get('service_name', '')}: {item.line[:MAX_MODEL_TEXT]}"
                     for item in _bounded_items(logs, 12)
                 )
-            except Exception:
-                warnings.append("Additional Loki query unavailable")
+            except Exception as exc:
+                warning = f"Additional Loki query unavailable: {exc}"
+                warnings.append(warning)
+                evidence_payload.setdefault("evidence_errors", []).append(warning)
+                logger.warning("Additional Loki query failed: %s", exc)
 
         for request in plan.repository_files:
             try:
                 if corpus is None:
                     raise ValueError("repository corpus unavailable")
-                name, relative = request.split(":", 1)
-                record = corpus.read_file(name, relative)
+                record = corpus.read_file(request.repository, request.path)
                 finding.repository_evidence.append(
                     {key: record[key] for key in ("repository", "path", "commit")}
                 )
@@ -2126,25 +2164,28 @@ def analyze_findings(
                 evidence_payload.setdefault("repository_files", []).append(
                     bounded_record
                 )
-            except OSError, ValueError, subprocess.CalledProcessError:
-                warnings.append(f"Repository evidence unavailable for {request}")
+            except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+                warning = f"Repository evidence unavailable for {request.repository}:{request.path}: {exc}"
+                warnings.append(warning)
+                evidence_payload.setdefault("evidence_errors", []).append(warning)
 
         for request in plan.repository_searches:
             try:
                 if corpus is None:
                     raise ValueError("repository corpus unavailable")
-                name, pattern = request.split(":", 1)
-                matches = corpus.search(name, pattern)[:40]
+                matches = corpus.search(request.repository, request.literal)[:40]
                 evidence_payload.setdefault("repository_searches", []).append(
                     {
-                        "repository": name,
-                        "commit": corpus.commit(name),
-                        "pattern": pattern,
+                        "repository": request.repository,
+                        "commit": corpus.commit(request.repository),
+                        "pattern": request.literal,
                         "matches": matches,
                     }
                 )
-            except OSError, ValueError, subprocess.CalledProcessError:
-                warnings.append(f"Repository search unavailable for {request}")
+            except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+                warning = f"Repository search unavailable for {request.repository}:{request.literal}: {exc}"
+                warnings.append(warning)
+                evidence_payload.setdefault("evidence_errors", []).append(warning)
 
         for query in plan.web_queries:
             sources, warning = web_search(vault, query)

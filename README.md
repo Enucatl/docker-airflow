@@ -50,6 +50,10 @@ docker compose run --build --rm --no-deps exam preflight
 Runs Friday at 02:00 UTC. Synchronizes repositories from
 `config/operations-repositories.json`, analyzes operational errors, and emails
 diagnoses. LLM endpoint: Vault connection `operations_analyst_openrouter`.
+The corpus is a separate volume of GitHub clones, not a copy of the live
+`/opt/docker` worktrees; ignored `.env` files and uncommitted changes are absent.
+Research planning receives tracked filenames and requests repository files and
+literal content searches through separate structured fields.
 Episode and fingerprint routing use the independent TypeSafe/Jev provider from
 Vault connection `operations_analyst_typesafe` (or `TYPESAFE_API_KEY`); the
 OpenRouter connection remains reserved for research planning and diagnosis.

@@ -1,7 +1,9 @@
 from datetime import UTC, datetime, timedelta
+import json
 import subprocess
 
 import pytest
+from pydantic import ValidationError
 
 from operations_analyst import (
     CONTROL_PLANE_GUIDANCE,
@@ -24,6 +26,8 @@ from operations_analyst import (
     LogOccurrence,
     LocalLog,
     RepositoryCorpus,
+    RepositoryFileRequest,
+    RepositorySearchRequest,
     ResearchPlan,
     TriageScore,
     analyze_findings,
@@ -93,8 +97,122 @@ def test_corpus_allows_any_file_but_confines_paths(tmp_path):
         corpus.read_file("repo", "uv.lock")["content"] == "updated generated material"
     )
     assert corpus.search("repo", "generated")
+    assert corpus.list_files("repo") == ["uv.lock"]
+    assert corpus.search("repo", "does not exist") == []
+    assert corpus.search("repo", ".*") == []
+    (corpus.root / "repo" / "uv.lock").write_text("literal [redis.*]\n")
+    assert corpus.search("repo", "[redis.*]") == ["uv.lock:1:literal [redis.*]"]
     with pytest.raises(ValueError, match="escapes"):
         corpus.read_file("repo", "../manifest.json")
+    with pytest.raises(subprocess.CalledProcessError):
+        RepositoryCorpus(tmp_path / "missing", manifest).search("repo", "redis")
+
+
+@pytest.mark.parametrize("field", ["repository_files", "repository_searches"])
+def test_research_plan_rejects_ambiguous_repository_request_strings(field):
+    with pytest.raises(ValidationError):
+        ResearchPlan.model_validate(
+            {field: ['repository:paperless-ai literal "redis"']}
+        )
+
+
+def test_research_uses_repository_inventory_and_passes_evidence_failures(monkeypatch):
+    """Keep valid repository evidence and missing evidence distinct in diagnosis."""
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    occurrences = [_occurrence(start)]
+    payloads = {}
+
+    class Corpus:
+        def list_repositories(self):
+            return ["paperless-ai"]
+
+        def list_files(self, name):
+            assert name == "paperless-ai"
+            return ["docker-compose.yml"]
+
+        def read_file(self, name, path):
+            assert name == "paperless-ai"
+            if path != "docker-compose.yml":
+                raise FileNotFoundError(path)
+            return {
+                "repository": name,
+                "path": path,
+                "commit": self.commit(name),
+                "content": "image: redis:8",
+            }
+
+        def search(self, name, literal):
+            if name != "paperless-ai":
+                raise ValueError(f"Unknown repository: {name}")
+            assert literal == "redis"
+            return ["docker-compose.yml:1:image: redis:8"]
+
+        def commit(self, name):
+            assert name == "paperless-ai"
+            return "commit-id"
+
+    def query(*_args, **_kwargs):
+        raise ValueError("invalid LogQL")
+
+    def invoke(schema, prompt, stage):
+        payloads[stage] = json.loads(prompt[prompt.index("{") :])
+        if schema is ResearchPlan:
+            return ResearchPlan(
+                additional_log_queries=['{service_name="paperless-ai"}'],
+                repository_files=[
+                    RepositoryFileRequest(repository="paperless-ai", path=path)
+                    for path in ("docker-compose.yml", ".env")
+                ],
+                repository_searches=[
+                    RepositorySearchRequest(repository=name, literal="redis")
+                    for name in ("paperless-ai", "missing")
+                ],
+            )
+        return Diagnosis(
+            classification="unclear",
+            status="unknown",
+            impact="Service degraded",
+            severity="low",
+            remediation_kind="unknown",
+            cause_status="unknown",
+            confidence="low",
+            analysis="Incomplete evidence",
+            repair_plan="",
+        )
+
+    monkeypatch.setattr(
+        "operations_analyst.enrich_episode_context", lambda _: EpisodeLocalContext()
+    )
+    monkeypatch.setattr("operations_analyst._host_context", lambda *_: {})
+    monkeypatch.setattr("common.loki.query_loki_range", query)
+    analyzed, warnings = analyze_findings(
+        object(),
+        aggregate_findings(occurrences),
+        Corpus(),
+        episodes=build_operational_episodes(occurrences),
+        jev_provider=_GateProvider(3, 3),
+        reasoning_invoker=invoke,
+    )
+
+    assert payloads["research_plan"]["repository_paths"] == {
+        "paperless-ai": ["docker-compose.yml"]
+    }
+    diagnosis = payloads["diagnosis"]
+    assert "repository_paths" not in diagnosis
+    assert diagnosis["repository_files"][0]["content"] == "image: redis:8"
+    assert diagnosis["repository_searches"][0]["matches"] == [
+        "docker-compose.yml:1:image: redis:8"
+    ]
+    assert analyzed[0].repository_evidence == [
+        {
+            "repository": "paperless-ai",
+            "path": "docker-compose.yml",
+            "commit": "commit-id",
+        }
+    ]
+    for detail in (".env", "Unknown repository: missing", "invalid LogQL"):
+        assert any(detail in warning for warning in warnings)
+        assert detail in json.dumps(diagnosis["evidence_errors"])
 
 
 def test_only_actionable_failures_receive_prompts():
