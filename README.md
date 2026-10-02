@@ -54,6 +54,15 @@ Episode and fingerprint routing use the independent TypeSafe/Jev provider from
 Vault connection `operations_analyst_typesafe` (or `TYPESAFE_API_KEY`); the
 OpenRouter connection remains reserved for research planning and diagnosis.
 
+Error candidates receive bounded, timestamped context from all log levels,
+including shutdown and recovery evidence. Diagnoses cite evidence IDs and report
+the last observed state separately from historical impact; incomplete context is
+flagged. Simultaneous service failures reuse cached host lifecycle logs, and the
+email groups fully diagnosed findings only when they cite the same host event.
+This adds no model calls; context uses at most 12 service lines and 12 host lines
+per diagnosis, plus up to five error examples and bounded research results.
+Recovered interruptions can be reported without generating a repair task.
+
 The cyber analyst uses `cyber_analyst_triage` for Jev routing and the separate
 `cyber_analyst_openrouter` connection for final alert reasoning.
 The triage connection stores its TypeSafe endpoint in `endpoint` (or

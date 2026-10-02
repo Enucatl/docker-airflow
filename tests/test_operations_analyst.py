@@ -14,10 +14,12 @@ from operations_analyst import (
     Diagnosis,
     EmitterKey,
     EpisodeFingerprint,
+    EpisodeDiagnosis,
     EpisodeLocalContext,
     EpisodeSummary,
     Evidence,
     Finding,
+    FingerprintEpisodeCandidate,
     FingerprintLocalContext,
     LogOccurrence,
     LocalLog,
@@ -157,7 +159,7 @@ def test_unknown_actionable_findings_are_not_rendered_as_diagnoses():
     )
 
     assert "Priority findings:\n- None" in body
-    assert "Unresolved:\n- [new] host / svc: 3" in body
+    assert "Unresolved:\n- [new; last observed: unknown] host / svc: 3" in body
     assert "Do not create a commit." not in body
 
 
@@ -492,6 +494,43 @@ def test_local_enrichment_uses_the_service_label_that_defined_the_emitter():
     assert "service_name" not in analyst._emitter_query(job_episode)
 
 
+def test_local_enrichment_keeps_unknown_level_lifecycle_logs_and_scopes_host(
+    monkeypatch,
+):
+    start = datetime(2026, 9, 28, 6, 18, 30, tzinfo=UTC)
+    episode = build_operational_episodes([_occurrence(start, host="docker.home.arpa")])[
+        0
+    ]
+    queries = []
+
+    def query(_connection, *, query, **_kwargs):
+        queries.append(query)
+        return {
+            "data": {
+                "result": [
+                    {
+                        "stream": {"detected_level": "unknown"},
+                        "values": [
+                            [
+                                str(int(start.timestamp() * 1e9)),
+                                "Registered tunnel connection protocol=quic",
+                            ]
+                        ],
+                    }
+                ]
+            }
+        }
+
+    monkeypatch.setattr("common.loki.query_loki_range", query)
+    context = enrich_episode_context(episode)
+
+    assert queries
+    assert all('host="docker.home.arpa"' in query for query in queries)
+    assert all("detected_level" not in query for query in queries)
+    assert any("Registered tunnel connection" in log.line for log in context.logs)
+    assert context.logs[0].level == "unknown"
+
+
 def test_local_enrichment_samples_across_a_noisy_context_window(monkeypatch):
     start = datetime(2026, 1, 1, tzinfo=UTC)
     episode = build_operational_episodes([_occurrence(start)])[0]
@@ -512,6 +551,74 @@ def test_local_enrichment_samples_across_a_noisy_context_window(monkeypatch):
     assert len(context.logs) == MAX_LOCAL_CONTEXT_LOGS
     assert context.logs[0].line == "log-0"
     assert context.logs[-1].line == f"log-{MAX_LOCAL_CONTEXT_LOGS + 99}"
+
+
+def test_saturated_local_context_marks_incomplete_evidence(monkeypatch):
+    start = datetime(2026, 1, 1, tzinfo=UTC)
+    episode = build_operational_episodes([_occurrence(start)])[0]
+    logs = [
+        LocalLog(
+            start + timedelta(milliseconds=index), f"log-{index}", "fp", "log", "info"
+        )
+        for index in range(500)
+    ]
+    monkeypatch.setattr("operations_analyst.query_episode_context", lambda *_: logs)
+
+    context = enrich_episode_context(episode)
+    local = derive_fingerprint_context(episode, episode.fingerprints[0], context)
+
+    assert context.truncated
+    assert local.truncated
+
+
+def test_lifecycle_endpoints_and_timestamps_survive_noisy_fingerprint_context():
+    import operations_analyst as analyst
+
+    start = datetime(2026, 9, 28, 6, 11, 29, tzinfo=UTC)
+    occurrences = [
+        _occurrence(start, "exit"),
+        _occurrence(start + timedelta(minutes=7), "timeout"),
+    ]
+    episode = build_operational_episodes(occurrences)[0]
+    shutdown = "Initiating graceful shutdown due to signal terminated"
+    recovery = "Registered tunnel connection protocol=quic"
+    logs = [
+        LocalLog(
+            start - timedelta(seconds=1), shutdown, "shutdown", shutdown, "unknown"
+        )
+    ]
+    logs.extend(
+        LocalLog(
+            start + timedelta(milliseconds=index),
+            f"shutdown message {index}",
+            "noise",
+            "shutdown message",
+            "unknown",
+        )
+        for index in range(60)
+    )
+    recovered_at = start + timedelta(minutes=7, seconds=13)
+    logs.append(LocalLog(recovered_at, recovery, "recovery", recovery, "unknown"))
+    local = derive_fingerprint_context(
+        episode, episode.fingerprints[0], EpisodeLocalContext(logs=logs)
+    )
+    candidate = FingerprintEpisodeCandidate(
+        episode.fingerprints[0],
+        episode,
+        local,
+        TriageScore(score=3, probabilities={}, confidence=1),
+    )
+    payload = analyst._candidate_payload(candidate, aggregate_findings(occurrences)[0])
+
+    assert any(
+        shutdown in line and (start - timedelta(seconds=1)).isoformat() in line
+        for line in payload["evidence"]
+    )
+    assert any(
+        recovery in line and recovered_at.isoformat() in line
+        for line in payload["evidence"]
+    )
+    assert "representative_lines" not in payload["local_context"]
 
 
 def test_overlapping_context_windows_are_deduplicated():
@@ -625,6 +732,8 @@ def test_global_deep_budget_limits_reasoning_and_reuses_episode_context(monkeypa
         if schema is ResearchPlan:
             return ResearchPlan()
         return Diagnosis(
+            classification="actionable_failure",
+            status="unknown",
             impact="service degraded",
             severity="high",
             remediation_kind="configuration",
@@ -662,6 +771,8 @@ def test_actionable_episode_diagnosis_is_not_overwritten_by_a_later_one(monkeypa
     diagnoses = iter(
         [
             Diagnosis(
+                classification="actionable_failure",
+                status="unknown",
                 impact="service degraded",
                 severity="high",
                 remediation_kind="configuration",
@@ -671,6 +782,8 @@ def test_actionable_episode_diagnosis_is_not_overwritten_by_a_later_one(monkeypa
                 repair_plan="restore the managed configuration",
             ),
             Diagnosis(
+                classification="transient_issue",
+                status="unknown",
                 impact="no durable impact established",
                 severity="low",
                 remediation_kind="unknown",
@@ -735,3 +848,311 @@ def test_reporting_includes_bounded_episode_summaries():
     assert "Episodes: 1" in report
     assert "stage-2 score 3.00" in report
     assert "episode-id" not in report
+
+
+def test_explicit_recovered_transient_diagnosis_needs_no_repair_plan(monkeypatch):
+    start = datetime(2026, 9, 28, 6, 18, 30, tzinfo=UTC)
+    occurrences = [_occurrence(start)]
+    recovered_at = start + timedelta(seconds=12)
+    recovery = "Registered tunnel connection protocol=quic"
+    monkeypatch.setattr(
+        "operations_analyst.enrich_episode_context",
+        lambda _: EpisodeLocalContext(
+            logs=[LocalLog(recovered_at, recovery, "recovery", recovery, "unknown")]
+        ),
+    )
+
+    def invoke(schema, prompt, _stage):
+        if schema is ResearchPlan:
+            return ResearchPlan()
+        import json
+
+        payload = json.loads(prompt[prompt.index("{") :])
+        recovery_id = next(
+            index for index, line in enumerate(payload["evidence"]) if recovery in line
+        )
+        return Diagnosis(
+            classification="transient_issue",
+            status="recovered",
+            status_evidence=[recovery_id],
+            impact="Brief interruption; connectivity recovered",
+            severity="low",
+            remediation_kind="unknown",
+            cause_status="unknown",
+            confidence="low",
+            analysis="The tunnel reconnected after startup",
+            repair_plan="",
+        )
+
+    analyzed, _ = analyze_findings(
+        object(),
+        aggregate_findings(occurrences),
+        None,
+        episodes=build_operational_episodes(occurrences),
+        jev_provider=_GateProvider(3, 3),
+        reasoning_invoker=invoke,
+    )
+    report = render_email_report(analyzed, start, start + timedelta(days=7), [])
+
+    assert analyzed[0].classification == "transient_issue"
+    assert analyzed[0].status == "recovered"
+    assert "Priority findings:\n- None" in report.plain_text
+    assert "recovered" in report.plain_text
+    assert "recovered" in report.html
+    assert report.attachments == {}
+
+
+@pytest.mark.parametrize("evidence_ids", [[], [-1], [999]])
+def test_unsupported_cause_and_current_status_claims_are_downgraded(
+    monkeypatch, evidence_ids
+):
+    start = datetime(2026, 9, 28, 6, 18, 30, tzinfo=UTC)
+    occurrences = [_occurrence(start)]
+    monkeypatch.setattr(
+        "operations_analyst.enrich_episode_context", lambda _: EpisodeLocalContext()
+    )
+
+    def invoke(schema, _prompt, _stage):
+        if schema is ResearchPlan:
+            return ResearchPlan()
+        return Diagnosis(
+            classification="actionable_failure",
+            status="ongoing",
+            status_evidence=evidence_ids,
+            impact="The tunnel is unavailable",
+            severity="critical",
+            remediation_kind="configuration",
+            cause_status="confirmed",
+            cause_evidence=evidence_ids,
+            confidence="high",
+            analysis="UDP is blocked",
+            repair_plan="Force HTTP2",
+        )
+
+    analyzed, _ = analyze_findings(
+        object(),
+        aggregate_findings(occurrences),
+        None,
+        episodes=build_operational_episodes(occurrences),
+        jev_provider=_GateProvider(3, 3),
+        reasoning_invoker=invoke,
+    )
+
+    assert analyzed[0].cause_status != "confirmed"
+    assert analyzed[0].status == "unknown"
+    assert analyzed[0].confidence != "high"
+
+
+def test_simultaneous_service_failures_reuse_one_host_lifecycle_query(monkeypatch):
+    import operations_analyst as analyst
+
+    start = datetime(2026, 9, 28, 6, 11, 29, tzinfo=UTC)
+    episodes = build_operational_episodes(
+        [
+            _occurrence(start, service=f"project-{index}/cloudflared")
+            for index in range(4)
+        ]
+    )
+    calls = []
+
+    def query(_connection, *, query, **_kwargs):
+        calls.append(query)
+        return {
+            "data": {
+                "result": [
+                    {
+                        "stream": {
+                            "host": "host",
+                            "job": "loki.source.journal.read_journal",
+                        },
+                        "values": [
+                            [
+                                str(int(start.timestamp() * 1e9)),
+                                "Reached target System Shutdown",
+                            ]
+                        ],
+                    }
+                ]
+            }
+        }
+
+    monkeypatch.setattr("common.loki.query_loki_range", query)
+    cache = {}
+    contexts = [analyst._host_context(episode, episodes, cache) for episode in episodes]
+
+    assert len(calls) == 1
+    assert 'host="host"' in calls[0]
+    assert "loki.source.journal.read_journal" in calls[0]
+    assert all(context is contexts[0] for context in contexts)
+    assert len(contexts[0]["services"]) == 4
+    assert "Reached target System Shutdown" in contexts[0]["logs"][0]
+
+
+def test_recovery_before_failure_and_service_log_as_host_cause_are_rejected():
+    import operations_analyst as analyst
+
+    start = datetime(2026, 9, 28, 6, 18, 30, tzinfo=UTC)
+    evidence = [
+        f"{(start - timedelta(seconds=1)).isoformat()} Registered tunnel connection",
+        f"{start.isoformat()} Failed to dial QUIC",
+        f"{start.isoformat()} host: Starting docker",
+    ]
+    diagnosis = Diagnosis(
+        classification="transient_issue",
+        status="recovered",
+        status_evidence=[0],
+        impact="Interrupted connectivity",
+        severity="low",
+        remediation_kind="unknown",
+        cause_status="likely",
+        cause_evidence=[1],
+        shared_host_event=1,
+        confidence="low",
+        analysis="A host restart interrupted the tunnel",
+        repair_plan="",
+    )
+
+    result = analyst._validate_diagnosis(diagnosis, evidence, [2], start)
+
+    assert result.status == "unknown"
+    assert result.shared_host_event is None
+
+
+@pytest.mark.parametrize("status", ["ongoing", "recovered"])
+def test_valid_status_and_host_cause_evidence_are_preserved(status):
+    import operations_analyst as analyst
+
+    start = datetime(2026, 9, 28, 6, 18, 30, tzinfo=UTC)
+    evidence = [
+        f"{start.isoformat()} host: Starting docker",
+        f"{(start + timedelta(seconds=12)).isoformat()} "
+        + (
+            "Registered tunnel connection"
+            if status == "recovered"
+            else "Connection still failing"
+        ),
+    ]
+    diagnosis = Diagnosis(
+        classification="transient_issue",
+        status=status,
+        status_evidence=[1],
+        impact="Interrupted connectivity",
+        severity="low",
+        remediation_kind="unknown",
+        cause_status="confirmed",
+        cause_evidence=[0],
+        shared_host_event=0,
+        confidence="high",
+        analysis="Host restarted",
+        repair_plan="",
+    )
+
+    result = analyst._validate_diagnosis(diagnosis, evidence, [0], start)
+
+    assert result.status == status
+    assert result.cause_status == "confirmed"
+    assert result.shared_host_event == 0
+
+
+@pytest.mark.parametrize("scenario", ["shared", "different", "missing", "incomplete"])
+def test_report_groups_only_fully_diagnosed_shared_host_events(scenario):
+    import operations_analyst as analyst
+
+    start = datetime(2026, 9, 28, 6, 18, 30, tzinfo=UTC)
+    findings = aggregate_findings(
+        [
+            _occurrence(start, "first", service="first"),
+            _occurrence(start, "second", service="second"),
+        ]
+    )
+    host_event = f"{start.isoformat()} host: Starting docker"
+    for index, finding in enumerate(findings):
+        finding.status = "recovered" if index == 0 else "ongoing"
+        finding.episode_summaries = [
+            EpisodeSummary(str(index), finding.emitters[0], start, start, 1)
+        ]
+        diagnosis = Diagnosis(
+            classification="transient_issue",
+            status=finding.status,
+            impact="Interrupted connectivity",
+            severity="low",
+            remediation_kind="unknown",
+            cause_status="likely",
+            confidence="low",
+            analysis="Host restarted",
+            repair_plan="",
+        )
+        finding.diagnoses = [
+            EpisodeDiagnosis(
+                str(index), start, start, diagnosis, finding.emitters[0], host_event
+            )
+        ]
+    if scenario == "different":
+        findings[1].diagnoses[0].host_event = "a different host event"
+    elif scenario == "missing":
+        findings[1].diagnoses[0].host_event = ""
+    elif scenario == "incomplete":
+        findings[1].episode_summaries.append(
+            EpisodeSummary("unexamined", findings[1].emitters[0], start, start, 1)
+        )
+
+    report_findings = analyst._report_findings(findings)
+
+    assert [finding.count for finding in findings] == [1, 1]
+    assert [finding.status for finding in findings] == ["recovered", "ongoing"]
+    if scenario == "shared":
+        assert len(report_findings) == 1
+        assert report_findings[0].count == 2
+        assert report_findings[0].status == "ongoing"
+        assert {item.diagnosis.status for item in report_findings[0].diagnoses} == {
+            "recovered",
+            "ongoing",
+        }
+        for index, finding in enumerate(findings):
+            finding.classification = "actionable_failure"
+            finding.remediation_kind = "configuration"
+            finding.analysis = f"Cause for service {index}"
+            finding.repair_plan = f"Repair for service {index}"
+        report = render_email_report(findings, start, start + timedelta(days=7), [])
+        playbook = next(iter(report.attachments.values()))
+        assert "Repair for service 0" in playbook
+        assert "Repair for service 1" in playbook
+    else:
+        assert len(report_findings) == 2
+
+
+def test_later_undiagnosed_failure_prevents_recovered_finding_status():
+    import operations_analyst as analyst
+
+    start = datetime(2026, 9, 28, 6, 18, 30, tzinfo=UTC)
+    occurrences = [_occurrence(start), _occurrence(start + timedelta(minutes=11))]
+    episodes = build_operational_episodes(occurrences)
+    finding = aggregate_findings(occurrences)[0]
+    finding.episode_summaries = [
+        EpisodeSummary(
+            episode.episode_id, episode.emitter, episode.start, episode.end, 1
+        )
+        for episode in episodes
+    ]
+    candidate = FingerprintEpisodeCandidate(
+        episodes[0].fingerprints[0],
+        episodes[0],
+        FingerprintLocalContext(),
+        TriageScore(score=3, probabilities={}, confidence=1),
+    )
+    diagnosis = Diagnosis(
+        classification="transient_issue",
+        status="recovered",
+        impact="Connectivity recovered",
+        severity="low",
+        remediation_kind="unknown",
+        cause_status="unknown",
+        confidence="low",
+        analysis="Tunnel reconnected",
+        repair_plan="",
+    )
+
+    analyst._attach_diagnosis(finding, candidate, diagnosis)
+
+    assert finding.diagnoses[0].diagnosis.status == "recovered"
+    assert finding.status == "unknown"
