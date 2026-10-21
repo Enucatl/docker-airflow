@@ -19,7 +19,6 @@ x-runner: &runner
     OTEL_EXPORTER_OTLP_TRACES_CLIENT_KEY: /run/secrets/key
   volumes:
     - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
-    - /scratch/archive:/scratch/archive
   secrets: [fullchain, key]
   user: "${AUTOMATION_UID:-50000}:0"
   networks: [default]
@@ -65,6 +64,9 @@ services:
 
   download-zanzara:
     <<: *runner
+    volumes:
+      - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
+      - /scratch/archive:/scratch/archive
     image: ghcr.io/enucatl/docker-airflow-download-zanzara:main
     build:
       context: .
