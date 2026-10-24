@@ -41,12 +41,13 @@ services:
     ports: ["5432:5432"]
     labels:
       - traefik.enable=true
+      - traefik.docker.network=airflow_traefik
       - traefik.tcp.routers.postgres-outputs.rule=HostSNI(`postgres.${DOMAIN}`)
       - traefik.tcp.routers.postgres-outputs.tls=true
       - traefik.tcp.routers.postgres-outputs.entrypoints=postgres
       - traefik.tcp.routers.postgres-outputs.service=postgres-outputs
       - traefik.tcp.services.postgres-outputs.loadbalancer.server.port=5432
-    networks: [default, traefik_proxy]
+    networks: [default, airflow_traefik]
 
   exam:
     <<: *runner
@@ -130,8 +131,9 @@ volumes:
 
 networks:
   default:
-  traefik_proxy:
-    external: true
+  airflow_traefik:
+    name: airflow_traefik
+    enable_ipv6: true
 
 secrets:
   fullchain:
